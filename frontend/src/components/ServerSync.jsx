@@ -241,6 +241,7 @@ const TINT = { ok: 'var(--green)', wait: 'var(--orange)', off: 'var(--grey)', ba
 // own rows (the phone's Admin and Disconnect), which belong in the same block.
 export function ServerSyncSection({ children }) {
   const user = useStore(s => s.user)
+  const telegramAuth = useStore(s => s.telegram?.status === 'ready')
   const sync = useStore(s => s.sync)
   useStore(s => s.S)   // the count of waiting changes follows every edit
   useStore(s => s.config)   // whether "Sign in" may offer a password
@@ -275,7 +276,7 @@ export function ServerSyncSection({ children }) {
       onClick={() => ui().openSheet(close => <CfAccessSheet close={close} server={sync.server || ''} />)} />}
     {sync.status === 'auth' && (MOBILE
       ? <Row icon="qr" iconTint="var(--indigo)" title={t('Pair again')} subtitle={t('Your changes are kept here, and merged into your account once it is paired again.')} accessory="chevron" onClick={pairAgain} />
-      : canSignIn() && <Row icon={pwOn() ? 'person' : 'fingerprint'} iconTint="var(--blue)" title={pwOn() ? t('Sign in') : t('Sign in with passkey')} subtitle={t('Your changes are kept here, and merged into your account once you are signed in again.')} accessory="chevron" onClick={signInAgain} />)}
+      : !telegramAuth && canSignIn() && <Row icon={pwOn() ? 'person' : 'fingerprint'} iconTint="var(--blue)" title={pwOn() ? t('Sign in') : t('Sign in with passkey')} subtitle={t('Your changes are kept here, and merged into your account once you are signed in again.')} accessory="chevron" onClick={signInAgain} />)}
     {/* another account's, kept when this one signed in over a copy that still owed them */}
     <KeptChangesRows />
     {children}

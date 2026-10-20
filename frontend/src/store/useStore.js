@@ -177,22 +177,11 @@ export const DEF = {
   // (lib/dumbbells.js). Single bells, lightest first. Kept per unit and stamped like the plates;
   // absent or empty = no list, and dumbbell lifts step by their increment as before.
   dumbbells: {},
-  // Gym check-in cards (see views/CheckIn.jsx). Each is a membership
-  // code shown as a QR/barcode at the gym's turnstile — added by typing it, importing a photo
-  // of the card, or scanning it. We only ever keep the code's VALUE, never a photo: the image
-  // is regenerated from `value` every time it's shown (lib/qr.js). `fmt` is the barcode symbology
-  // ('qrcode' | 'ean13' | 'code128' | … — lower-cased BarcodeFormat) so it renders as the same
-  // kind of code the gym issued. Just data, so it syncs and backs up like everything else.
-  //   [{ id, label, value, fmt }]
+  // Legacy gym membership QR data. Check-in screens were removed, but retain old card data in
+  // profiles and backups rather than silently discarding it.
   gymCards: [],
-  // The card the check-in screen last settled on, so it reopens where you left it (handy when
-  // you have more than one gym). Holds a gymCards id, or null before any card exists / is chosen;
-  // a stale id (card since removed) is simply ignored by the view.
+  // Legacy selection for gymCards, kept with the stored card data for profile compatibility.
   lastGymCardId: null,
-  // Whether the check-in feature is on at all (Settings toggle). Off hides the Home
-  // card and the /checkin route; the saved gymCards stay so turning it back on restores them.
-  // Defaults on; an older profile without the key reads as on (`!== false`).
-  checkIn: true,
   // Whether the body-weight summary card is shown on Home. Off only hides that card: existing
   // entries, Stats, imports and the separate pre-workout weigh-in flow keep working.
   // Defaults on; an older profile without the key reads as on (`!== false`).

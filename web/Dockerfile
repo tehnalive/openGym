@@ -74,6 +74,9 @@ COPY web/nginx.conf.template /etc/nginx/templates/default.conf.template
 # of a server that 404s under the prefix. nginx's entrypoint runs these scripts in order; 05 is
 # before the template rendering at 20.
 COPY --chmod=755 web/05-check-base-path.sh /docker-entrypoint.d/
+USER root
+RUN sed -i 's/\r$//' /docker-entrypoint.d/05-check-base-path.sh
+USER 101
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 # The exercise stills and animations, 180 px, licensed from Gym visual for openGym only: see
 # catalogue/media/NOTICE.md. They ship inside the image; nothing is downloaded at start-up.

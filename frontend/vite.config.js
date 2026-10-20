@@ -109,6 +109,9 @@ export default defineConfig({
     // and is imported by the phone build. vite build and vitest already reach it; the dev
     // server needs to be told the workspace is wider than frontend/.
     fs: { allow: ['..'] },
+    // Quick Cloudflare tunnels use a generated hostname. Explicitly allow the one supplied
+    // through the local .env instead of disabling Vite's host-header protection.
+    allowedHosts: process.env.APP_HOST ? [process.env.APP_HOST] : [],
     proxy: {
       '/api': { target: backend, changeOrigin: true, headers: { Origin: apiOrigin } },
       ...(media ? {

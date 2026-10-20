@@ -36,6 +36,10 @@ import { stampPut } from './sync-stamps.js';
 import { atomicWrite as durableWrite } from './durable.js';
 import { excusedOn, nudgeFor, nudgeWindowOpen, toneOf } from './nudge.js';
 import { validateTelegramInitData, TelegramAuthError } from './telegram-auth.mjs';
+import {
+  notificationState, previousWeekRange, publicNotificationPreferences, statsForWorkout,
+  validNotificationPreferences, weekStart, weeklySummaryText, workoutNotificationText,
+} from './telegram-notifications.mjs';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -517,6 +521,84 @@ function nudgeTick(user, S, now) {
   saveDb();
   sendPush(user.id, nudgePush(S.lang, toneOf(S.reminder), routine, now.date));
 }
+
+// Telegram messages are a separate, explicit opt-in from web push. All outgoing requests use the
+// server-only bot token; fixed diagnostics deliberately omit Telegram's response and token URL.
+async function sendTelegramNotification(telegramId, text) {
+  if (!TELEGRAM_LOGIN || typeof telegramId !== 'string' || !telegramId) return false;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: telegramId, text }), signal: AbortSignal.timeout(8000),
+    });
+    const result = await response.json();
+    if (!response.ok || result?.ok !== true) throw new Error('Telegram rejected notification');
+    return true;
+  } catch {
+    console.warn('telegram notification delivery failed');
+    return false;
+  }
+}
+
+function maybeNotifyNewWorkout(user, previous, next) {
+  if (!TELEGRAM_LOGIN || user.disabled || !user.telegramId) return;
+  const prefs = publicNotificationPreferences(user);
+  if (!prefs.workoutUpdates) return;
+  const before = new Set((Array.isArray(previous?.workouts) ? previous.workouts : [])
+    .map(workout => workout?.id).filter(id => typeof id === 'string' || Number.isSafeInteger(id)).map(String));
+  const attempted = new Set(notificationState(user).attemptedWorkoutIds);
+  const now = Date.now();
+  const added = (Array.isArray(next?.workouts) ? next.workouts : [])
+    .filter(workout => workout && (typeof workout.id === 'string' || Number.isSafeInteger(workout.id)))
+    .filter(workout => !before.has(String(workout.id)) && !attempted.has(String(workout.id)))
+    .filter(workout => Number.isFinite(workout.end) && workout.end >= now - 48 * 60 * 60 * 1000 && workout.end <= now + 5 * 60 * 1000)
+    .map(workout => ({ workout, stats: statsForWorkout(workout) }))
+    .filter(item => item.stats.sets > 0)
+    .sort((a, b) => b.workout.end - a.workout.end);
+  if (!added.length) return;
+
+  // A sync may add several recent records (for example after being offline). Send one useful
+  // digest for the newest workout and record the whole batch before calling Telegram, so a retry
+  // of the same state write cannot spam the chat.
+  const ids = added.map(({ workout }) => String(workout.id));
+  const state = notificationState(user);
+  state.attemptedWorkoutIds = [...state.attemptedWorkoutIds, ...ids].slice(-500);
+  try { saveDb(); } catch { console.error('telegram notification checkpoint could not be saved'); return; }
+  const latest = added[0].workout;
+  void sendTelegramNotification(user.telegramId, workoutNotificationText(latest, next));
+}
+
+function telegramWeeklyTick() {
+  if (!TELEGRAM_LOGIN) return;
+  for (const user of db.users) {
+    if (user.disabled || !user.telegramId) continue;
+    const prefs = publicNotificationPreferences(user);
+    if (!prefs.weeklySummary) continue;
+    try {
+      const now = userNow(prefs.timezone);
+      if (!now || now.weekday !== 1 || now.hhmm < '09:00') continue;
+      const thisWeek = weekStart(now.date);
+      if (!thisWeek) continue;
+      const checkpoint = notificationState(user);
+      if (checkpoint.lastWeeklySummaryKey === thisWeek) continue;
+      const S = readStateCached(user.id);
+      if (!S || !Array.isArray(S.workouts)) continue;
+      const range = previousWeekRange(thisWeek);
+      const workouts = S.workouts.filter(workout => typeof workout?.d === 'string'
+        && workout.d >= range.from && workout.d <= range.to);
+      checkpoint.lastWeeklySummaryKey = thisWeek;
+      saveDb();
+      const text = weeklySummaryText(workouts, S, range);
+      if (text) void sendTelegramNotification(user.telegramId, text);
+    } catch {
+      console.error('telegram weekly summary skipped for an unreadable profile');
+    }
+  }
+}
+
+const TELEGRAM_WEEKLY_TICK_MS = Math.max(1000, +(process.env.TELEGRAM_WEEKLY_TICK_MS || 60000) || 60000);
+setInterval(telegramWeeklyTick, TELEGRAM_WEEKLY_TICK_MS).unref();
+
 setInterval(() => {
   for (const user of db.users) {
     if (!db.subs.some(s => s.userId === user.id)) continue;
@@ -1992,6 +2074,35 @@ const routes = {
     json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) }, ...(renew ? { token: makeSession(user) } : {}) });
   },
 
+  // Preferences are stored on the Telegram-bound account, never on a caller-supplied chat id.
+  'GET /api/telegram/notifications': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
+    if (!TELEGRAM_LOGIN || !user.telegramId) return json(res, 403, { error: 'Telegram notifications are unavailable' });
+    json(res, 200, { preferences: publicNotificationPreferences(user) });
+  },
+  'PUT /api/telegram/notifications': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
+    if (!TELEGRAM_LOGIN || !user.telegramId) return json(res, 403, { error: 'Telegram notifications are unavailable' });
+    const body = await readBody(req);
+    if (readSession(req) !== user || !stateIdentityMatches(req, res, user)) return;
+    if (!validNotificationPreferences(body)) return json(res, 400, { error: 'invalid notification preferences' });
+    const previous = user.telegramNotifications;
+    const next = {
+      ...(previous && typeof previous === 'object' && !Array.isArray(previous) ? previous : {}),
+      workoutUpdates: body.workoutUpdates,
+      weeklySummary: body.weeklySummary,
+      timezone: body.timezone,
+    };
+    user.telegramNotifications = next;
+    try { saveDb(); }
+    catch (error) { user.telegramNotifications = previous; throw error; }
+    json(res, 200, { preferences: publicNotificationPreferences(user) });
+  },
+
   // The signed Telegram identity is a way into its own profile. Never link by a display
   // name, e-mail, client uid, existing browser session, or unverified initDataUnsafe.
   // This route intentionally keeps the normal same-origin CSRF policy.
@@ -2376,6 +2487,8 @@ const routes = {
     if (MEDIA_ON) {
       try { MEDIA.noteState(user.id, body.state); } catch (e) { console.error('media noteState', e); }
     }
+    try { maybeNotifyNewWorkout(user, cur, body.state); }
+    catch { console.error('telegram workout notification was skipped'); }
     json(res, 200, { ok: true, ts: body.state._ts || null, rev: curRev + 1, wid: body.state._wid });
   },
 

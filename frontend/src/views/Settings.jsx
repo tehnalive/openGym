@@ -83,6 +83,7 @@ export default function Settings({ page = null, find = null, via = null }) {
   const S = useStore(s => s.S)
   const user = useStore(s => s.user)
   const sync = useStore(s => s.sync)
+  const telegramAuth = useStore(s => s.telegram?.status === 'ready')
   const coachLocal = useStore(s => s.coachLocal)
   // Name-and-password sign-in, where the instance offers it (#118).
   const config = useStore(s => s.config)
@@ -92,7 +93,7 @@ export default function Settings({ page = null, find = null, via = null }) {
   const lang = effectiveLang(S, config)
   // This profile's passkeys and the code for another device (#95). A change to them is read back
   // here and by the password row, whose "Remove" depends on there being a passkey.
-  const passkeys = usePasskeys(!!user && !MOBILE && !DEMO && (page === 'account'))
+  const passkeys = usePasskeys(!!user && !MOBILE && !DEMO && !telegramAuth && (page === 'account'))
   const [credsV, setCredsV] = useState(0)
   const credsChanged = () => { passkeys.load(); setCredsV(v => v + 1) }
   const { update, importConflict, importBackup, setUnit, resetEverything: resetAll, setUser, pullState, pushState, resetDemo } = useStore()
@@ -614,7 +615,7 @@ export default function Settings({ page = null, find = null, via = null }) {
       </>
     },
 
-    reminders: () => <NotificationsCard S={S} update={update} toast={toast} />,
+    reminders: () => <NotificationsCard S={S} update={update} toast={toast} telegramAuth={telegramAuth} user={user} />,
 
     plan: () => <>
       <Section>
@@ -751,11 +752,6 @@ export default function Settings({ page = null, find = null, via = null }) {
         </Row>
       </Section>
       <Section title={t('On Home')}>
-        {/* Membership QR codes on Home (views/CheckIn.jsx); off = no Home card, no route. */}
-        <Row icon="qr" iconTint="var(--blue)" title={t('Gym check-in')}
-          subtitle={t('Show a card on Home with your membership QR codes.')}>
-          <Switch checked={S.checkIn !== false} onChange={v => update(s => { s.checkIn = v })} />
-        </Row>
         {/* The Home summary is optional; hiding it leaves weight logging, history and Stats intact. */}
         <Row icon="scale" iconTint="var(--green)" title={t('Body weight')}
           subtitle={t('Show the body weight card on Home.')}>
@@ -850,7 +846,7 @@ export default function Settings({ page = null, find = null, via = null }) {
       </ServerSyncSection>}
 
       {/* account (demo and mobile builds have nothing to sign in to) */}
-      {!(MOBILE && user) && <Section title={MOBILE ? t('Your data') : DEMO ? t('Demo') : t('Account')}>
+      {!(MOBILE && user) && (!telegramAuth || user?.admin) && <Section title={MOBILE ? t('Your data') : DEMO ? t('Demo') : t('Account')}>
         {MOBILE ? <>
           <Row icon="lock" iconTint="var(--acc)" title={t('All data stays on this phone')} subtitle={t('No account, no cloud. Back it up anytime in Data & backup.')} />
           <Row icon="cloud" iconTint="var(--indigo)" title={t('Connect to my server')} subtitle={t('Sync this device to your own self-hosted openGym instead.')} accessory="chevron"
@@ -864,14 +860,16 @@ export default function Settings({ page = null, find = null, via = null }) {
             onClick={() => window.open(REPO, '_blank', 'noopener')} />
         </> : user ? <>
           {user.admin && <Row icon="crown" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}
-          <PasskeysRow state={passkeys.st} changed={credsChanged} />
-          <DeviceLinkRow state={passkeys.st} />
-          <Row icon="qr" iconTint="var(--blue)" title={t('Pair the mobile app')} subtitle={t('Connect the openGym app on your phone to this account.')} accessory="chevron"
-            onClick={() => useUI.getState().openSheet(close => <PairSheet close={close} />)} />
-          {pwOn && <PasswordRow version={credsV} />}
-          <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={signOutHere} />
-          <Row icon="shield" iconTint="var(--red)" title={t('Sign out everywhere')} subtitle={t('Ends this profile’s sessions on all your devices.')} danger onClick={signOutEverywhere} />
-          <AccountIdRow id={user.id} />
+          {!telegramAuth && <>
+            <PasskeysRow state={passkeys.st} changed={credsChanged} />
+            <DeviceLinkRow state={passkeys.st} />
+            <Row icon="qr" iconTint="var(--blue)" title={t('Pair the mobile app')} subtitle={t('Connect the openGym app on your phone to this account.')} accessory="chevron"
+              onClick={() => useUI.getState().openSheet(close => <PairSheet close={close} />)} />
+            {pwOn && <PasswordRow version={credsV} />}
+            <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={signOutHere} />
+            <Row icon="shield" iconTint="var(--red)" title={t('Sign out everywhere')} subtitle={t('Ends this profile’s sessions on all your devices.')} danger onClick={signOutEverywhere} />
+            <AccountIdRow id={user.id} />
+          </>}
         </> : webauthnOK() ? <>
           <Row icon="plusCircle" iconTint="var(--acc)" title={t('Create passkey profile')} subtitle={t('Keeps your data safe and separate per person.')} accessory="chevron" onClick={registerHere} />
           <Row icon="fingerprint" iconTint="var(--blue)" title={t('Sign in with passkey')} accessory="chevron" onClick={passkeySignIn} />
@@ -1063,9 +1061,69 @@ function effortHelpSheet() {
   </>)
 }
 
-function NotificationsCard({ S, update, toast }) {
-  if (MOBILE) return <MobileReminderCard S={S} update={update} toast={toast} />
-  return <PushCard S={S} update={update} toast={toast} />
+function NotificationsCard({ S, update, toast, telegramAuth, user }) {
+  return <>
+    {telegramAuth && <TelegramMessagesCard user={user} toast={toast} />}
+    {MOBILE ? <MobileReminderCard S={S} update={update} toast={toast} /> : <PushCard S={S} update={update} toast={toast} />}
+  </>
+}
+
+function TelegramMessagesCard({ user, toast }) {
+  const [prefs, setPrefs] = useState({ workoutUpdates: false, weeklySummary: false })
+  const [busy, setBusy] = useState(true)
+  const [unavailable, setUnavailable] = useState(false)
+
+  useEffect(() => {
+    let gone = false
+    api('/api/telegram/notifications', { headers: { 'X-OpenGym-User': user.id } })
+      .then(async result => {
+        let current = result.preferences
+        if (current.timezone !== localTZ()) {
+          try {
+            const saved = await api('/api/telegram/notifications', {
+              method: 'PUT', headers: { 'X-OpenGym-User': user.id },
+              body: JSON.stringify({ ...current, timezone: localTZ() }),
+            })
+            current = saved.preferences
+          } catch { /* Keep the saved timezone; a later settings save can update it. */ }
+        }
+        if (!gone) { setPrefs(current); setUnavailable(false) }
+      })
+      .catch(() => { if (!gone) setUnavailable(true) })
+      .finally(() => { if (!gone) setBusy(false) })
+    return () => { gone = true }
+  }, [user.id])
+
+  const setPreference = async (key, value) => {
+    const next = { ...prefs, [key]: value, timezone: localTZ() }
+    setBusy(true)
+    try {
+      const result = await api('/api/telegram/notifications', {
+        method: 'PUT', headers: { 'X-OpenGym-User': user.id }, body: JSON.stringify(next),
+      })
+      setPrefs(result.preferences)
+      setUnavailable(false)
+    } catch {
+      toast(t('Could not change notification settings'))
+    } finally { setBusy(false) }
+  }
+
+  return <Section title={t('Telegram bot messages')} footer={unavailable
+    ? t('Telegram bot notifications are unavailable on this server.')
+    : t('The weekly recap arrives on Monday morning in your local timezone.')}>
+    <Row icon="chat" iconTint="var(--blue)" title={t('Open the bot chat and press Start first')}
+      subtitle={<a href="https://t.me/Gym_statsbot">{t('Open the bot chat')}</a>} />
+    <Row icon="dumbbell" iconTint="var(--orange)" title={t('Workout updates')}
+      subtitle={t('A short summary after a newly saved workout.')}>
+      <Switch checked={!!prefs.workoutUpdates} disabled={busy || unavailable}
+        onChange={value => setPreference('workoutUpdates', value)} />
+    </Row>
+    <Row icon="chartLine" iconTint="var(--green)" title={t('Weekly progress recap')}
+      subtitle={t('Workouts, working sets, volume and trained muscle groups.')}>
+      <Switch checked={!!prefs.weeklySummary} disabled={busy || unavailable}
+        onChange={value => setPreference('weeklySummary', value)} />
+    </Row>
+  </Section>
 }
 
 // Mobile build: the reminder is a native local notification scheduled on planned weekdays —

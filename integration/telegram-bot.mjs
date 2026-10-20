@@ -83,9 +83,9 @@ export function launchMessage(update, config) {
   if (config.allowedIds && !config.allowedIds.has(message.from.id)) return null;
   return {
     chat_id: message.chat.id,
-    text: 'Открыть дневник тренировок:',
+    text: 'Привет! Здесь вы ведёте дневник тренировок и следите за прогрессом.\nНажмите «Открыть дневник», чтобы войти через Telegram и записать тренировку.',
     reply_markup: { inline_keyboard: [[{
-      text: 'Открыть приложение', web_app: { url: config.miniAppUrl },
+      text: 'Открыть дневник', web_app: { url: config.miniAppUrl },
     }]] },
   };
 }

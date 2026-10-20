@@ -28,6 +28,7 @@ export const PENDING_GRACE_MS = 5000
 // by the dot that stands in for it when the banner is switched off (useConnectionTrouble).
 function useConnection() {
   const user = useStore(s => s.user)
+  const telegramAuth = useStore(s => s.telegram?.status === 'ready')
   const sync = useStore(s => s.sync)
   const guest = useStore(s => s.isGuest())
   const onboarding = useStore(s => s.needsMobileOnboarding)
@@ -45,7 +46,7 @@ function useConnection() {
   // Signed out on the web, the sign-in screen is the whole app: it hears only that the server
   // ended the session, and that the changes are still here.
   const show = !DEMO && !onboarding && !!view?.banner && (!!user || guest || status === 'auth') && (status !== 'pending' || waited)
-  return { view, show, user, status }
+  return { view, show, user, status, telegramAuth }
 }
 
 // "Show connection status" (#369, #330): on by default, and an older profile without the key
@@ -75,7 +76,7 @@ export default function SyncBanner() {
   const local = useStore(s => showsLocalLine(s.S))
   const update = useStore(s => s.update)
   const conn = useConnection()
-  const { view, user, status } = conn
+  const { view, user, status, telegramAuth } = conn
   const quiet = view?.tone === 'quiet'
   const show = conn.show && on && (!quiet || local)
   const row = useRef(null)
@@ -92,14 +93,14 @@ export default function SyncBanner() {
   }, [show])
 
   if (!show) return null
-  const act = {
+  const act = telegramAuth && view.action === 'signin' ? null : ({
     retry: () => { syncNowWithToast() },
     pair: pairAgain,
     connect: connectServer,
     // Signed in, or with a session the server ended: the passkey right here. A guest goes to
     // Settings, where signing in sits next to creating a profile.
     signin: () => (user || status === 'auth' ? signInAgain() : nav('/settings/account')),
-  }[view.action]
+  }[view.action])
   const label = actionLabel(view)
   const inner = <>
     <Icon name={view.icon} />

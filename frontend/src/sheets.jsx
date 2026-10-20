@@ -170,6 +170,7 @@ const PLAN_COPY = {
   'full-body': () => ({ name: t('Full Body'), about: t('Three sessions, the whole body each time.') }),
   '5x5': () => ({ name: t('5×5'), about: t('Five sets of five on the main barbell lifts.') })
 }
+export const starterPlanDetails = id => PLAN_COPY[id]?.() ?? null
 
 // Adds the plan's routines (reusing one you already have under the same name) and puts them on
 // its weekdays. Existing routines are never touched
@@ -3385,7 +3386,12 @@ function doFinishWorkout() {
   const w = buildCompletedWorkout(A, {
     end: past ? backfillEnd(A) : sessionEnd(A),
     prs,
-    snapshotFor: e => isCustomEx(EXIDX[e.id]) ? exerciseMuscleSnapshot(EXIDX[e.id]) : null,
+    snapshotFor: e => {
+      const ex = EXIDX[e.id]
+      if (!ex) return null
+      const snapshot = exerciseMuscleSnapshot(ex)
+      return isCustomEx(ex) ? snapshot : (snapshot.muscleWeights ? { muscleWeights: snapshot.muscleWeights } : null)
+    },
   })
   w.vol = workoutVolume(w)
   let shown = w
