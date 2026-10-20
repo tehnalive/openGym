@@ -62,12 +62,16 @@
      under the status and navigation bars, the app passes the bars themselves as --native-sat and
      --native-sab (MainActivity.java). The larger one wins, so a WebView that learns to report
      the bars does not count them twice. */
-  --sab:max(env(safe-area-inset-bottom,0px),var(--native-sab,0px));
-  --sat:max(env(safe-area-inset-top,0px),var(--native-sat,0px));
+  --sab:max(env(safe-area-inset-bottom,0px),var(--native-sab,0px),var(--tg-safe-bottom,0px));
+  --sat:max(env(safe-area-inset-top,0px),var(--native-sat,0px),var(--tg-safe-top,0px));
   /* height of the connection indicator under the status bar, 0 while there is none — set by
      components/SyncBanner.jsx. Whatever starts at the top of the screen starts below it. */
   --conn:0px;
 }
+
+.telegram-entry{max-width:480px;margin:0 auto;padding:calc(25vh + var(--sat)) 24px calc(24px + var(--sab));text-align:center}
+.telegram-entry h1{font-size:28px;font-weight:600;margin-bottom:20px}
+.telegram-entry p{line-height:1.6;color:var(--label-2);margin-bottom:24px}
 
 :root[data-theme="light"] {
   --bg:        #f2f2f7;

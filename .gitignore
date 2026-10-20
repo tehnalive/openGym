@@ -30,3 +30,10 @@ frontend/bundle-size.json
 
 # Local planning notes
 docs/superpowers/plans/
+
+# Local caches, dependency installs, and prototype data
+.cache/
+.env.local
+coverage/
+test-results/
+playwright-report/

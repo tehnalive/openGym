@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api, setRemoteAuth } from '../lib/api.js'
+import { isTelegramLaunch, loadTelegram, prepareTelegram, telegramError } from '../lib/telegram.js'
 import { localTZ } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
 import { registerCustom, healCustomEx } from '../lib/exercises.js'
@@ -306,6 +307,15 @@ export function restoredStateFor(local, remote, dirty = false) {
 }
 
 export const useStore = create((set, get) => {
+  const telegramLaunch = !MOBILE && !DEMO && isTelegramLaunch()
+  let telegramBoot = null
+  let telegramUid = null
+  let telegramCleanup = null
+  let authEpoch = 0
+  const telegramBlocked = () => telegramLaunch && !['ready', 'adopting'].includes(get()?.telegram?.status)
+  const identity = () => ({ epoch: authEpoch, uid: get().user?.id, owner: localStorage.getItem('gym_owner') })
+  const currentIdentity = i => i.epoch === authEpoch && i.uid === get().user?.id && i.owner === localStorage.getItem('gym_owner')
+  const ownerHeaders = i => i.uid ? { 'X-OpenGym-User': i.uid } : {}
   let pushTm = null
   let saveTm = null
   let toldTooLarge = false
@@ -447,6 +457,7 @@ export const useStore = create((set, get) => {
   // pairing are the same thing to the person holding it — the device has to be paired or signed
   // in again, and nothing on it is lost meanwhile.
   const failed = (e, extra = {}) => {
+    if (telegramLaunch && e?.data?.code === 'account-changed') set({ ready: false, telegram: { status: 'error', message: 'В другой вкладке изменился аккаунт. Повторите вход через Telegram.' } })
     const lastError = { status: e?.status ?? 0, code: e?.code || (e?.status === 401 ? 'auth' : isNetworkError(e) ? 'network' : 'http') }
     if (refused(e)) setSync({ auth: true, offline: false, lastError, ...extra })
     else if (isNetworkError(e)) setSync({ offline: true, lastError, ...extra })
@@ -633,6 +644,7 @@ export const useStore = create((set, get) => {
   // server is pushed on the same occasion. A phone that sat in a pocket all afternoon and a
   // desktop tab left open all week used to show, and then push, whatever they last had.
   const checkRev = async (force = false) => {
+    if (telegramBlocked()) return
     if (!get().user || !get().ready || document.visibilityState === 'hidden') return
     if (!force && Date.now() - lastCheck < CHECK_MIN_MS) return
     lastCheck = Date.now()
@@ -643,11 +655,15 @@ export const useStore = create((set, get) => {
     if (pulling) return pulling
     const { base } = metaOf()
     if (!base || owes()) return get().pullState()
+    const who = identity()
     try {
-      const { rev, wid } = await api('/api/data/rev')
+      const { rev, wid } = await api('/api/data/rev', { headers: ownerHeaders(who) })
+      if (!currentIdentity(who)) return
       if (rev !== base.rev || (base.wid && wid && wid !== base.wid)) return get().pullState()
       confirmed(get().S)   // nothing moved on either side
     } catch (e) {
+      if (!currentIdentity(who)) return
+      if (e.data?.code === 'account-changed') { failed(e); return }
       if (isNetworkError(e) || refused(e)) failed(e)
       else return get().pullState()   // a server that lacks the route (older API) — the full pull knows the old protocol
     }
@@ -703,6 +719,8 @@ export const useStore = create((set, get) => {
   const adopt = (next, rev) => { persist(next, false, false); writeSync(rev, next._ts, next._wid); markOwed(false) }
 
   const doPush = async (attempt = 0) => {
+    if (telegramBlocked()) return
+    const who = identity()
     const S = get().S
     const { base } = metaOf()
     // A forced push is one attempt. One that fails is retried as an ordinary push against the
@@ -721,7 +739,8 @@ export const useStore = create((set, get) => {
     if (asReplace != null) { body.baseRev = asReplace.rev; if (asReplace.wid) body.baseWid = asReplace.wid }
     else if (!force && base) { body.baseRev = base.rev; if (base.wid) body.baseWid = base.wid }
     try {
-      const r = await api('/api/data', { method: 'PUT', body: JSON.stringify(body) })
+      const r = await api('/api/data', { method: 'PUT', headers: ownerHeaders(who), body: JSON.stringify(body) })
+      if (!currentIdentity(who)) return
       // A server from before revisions answers without one — then there is nothing to hold the
       // next push to, and the marker must not pretend otherwise.
       if (r.rev == null) dropSync()
@@ -737,6 +756,8 @@ export const useStore = create((set, get) => {
         import('./useUI.js').then(({ useUI }) => useUI.getState().toast(t('Back online and synced with the server.'))).catch(() => {})
       }
     } catch (e) {
+      if (!currentIdentity(who)) return
+      if (e.data?.code === 'account-changed') { failed(e); return }
       if (e.status === 409 && e.data && attempt < 2) {
         // Another device wrote since this one last read. The server sent its document along;
         // merge and push once more against that revision. A second refusal in a row leaves the
@@ -796,6 +817,8 @@ export const useStore = create((set, get) => {
     if (e.key !== 'gym_owner') return
     const owner = readOwner()
     if (owner === seenOwner) return
+    if (telegramLaunch && telegramUid && seenOwner === telegramUid) keepForPrevious(seenOwner)
+    authEpoch++
     clearTimeout(pushTm)
     pushTm = null
     // A guest's workout running here went along with the sign-in in the other tab (it joined this
@@ -814,6 +837,11 @@ export const useStore = create((set, get) => {
     handedOver = true
     const user = get().user
     set({ ...(user && user.id !== owner ? { user: null } : {}), S })
+    // A different Telegram window may share this origin and cookie jar. Never follow its login.
+    if (telegramLaunch && telegramUid && owner !== telegramUid) {
+      set({ ready: false, telegram: { status: 'error', message: 'В другой вкладке изменился аккаунт. Повторите вход через Telegram.' } })
+      return
+    }
     takeSaved()
   })
   // Another tab of this browser synced — its marker moved to a revision this tab's copy does not
@@ -861,6 +889,7 @@ export const useStore = create((set, get) => {
   // this tab is signed in too, as a tab opened now would be. The session cookie is the browser's.
   // A guest's workout carried into the account shows here again.
   const followSignIn = () => {
+    if (telegramBlocked() || (telegramLaunch && telegramUid && readOwner() !== telegramUid)) return false
     if (get()?.user || handedOver) return false
     const owner = readOwner()
     if (!owner || owner !== seenOwner || readWidOwner() !== owner || readWid() !== seenWid) return false
@@ -1086,7 +1115,9 @@ export const useStore = create((set, get) => {
   const applyStash = async () => {
     const user = get().user
     if (!user) return
+    const who = identity()
     const all = await readStashes()
+    if (!currentIdentity(who)) throw new Error('account changed')
     const exact = stashKey(serverBase(), user.id)
     const keys = Object.keys(all).filter(k => k === exact || (all[k]?.uid === user.id && !all[k]?.server))
     if (!keys.length) return
@@ -1101,6 +1132,7 @@ export const useStore = create((set, get) => {
     markOwed(true)
     if (MOBILE) await nativePersist(true)   // the durable copy holds it before the stash goes
     await get().pushState()
+    if (!currentIdentity(who)) throw new Error('account changed')
     for (const k of keys) delete all[k]
     await writeStashes(all)
   }
@@ -1123,13 +1155,15 @@ export const useStore = create((set, get) => {
   // the decision is written and pushed; only a server that could not be reached leaves it owed.
   const runAdopt = async (ask, { alwaysAsk = false } = {}) => {
     if (pulling) await pulling
+    const who = identity()
+    const stillHere = () => { if (!currentIdentity(who)) throw new Error('account changed') }
     // An adoption resumed after a restart is the sign-in's own: whether this copy already belonged
     // to the account was decided then — boot's sign-in sees the owner that sign-in wrote.
     const owedMark = adoptOwed()
     const sameAccount = owedMark ? !!owedMark.rejoined : rejoined
     if (owedMark?.alwaysAsk) alwaysAsk = true
     let res
-    try { res = await api('/api/data') }
+    try { res = await api('/api/data', { headers: ownerHeaders(who) }); stillHere() }
     catch (e) {
       failed(e)
       // Nothing decided: with a sign-in that marked it, sync stays held and the next check asks
@@ -1143,16 +1177,20 @@ export const useStore = create((set, get) => {
     const askAbout = async extras => {
       if (!(extras.workouts || extras.bodyweight || extras.customEx || extras.routines || extras.setup) || typeof ask !== 'function') return false
       asked = true
-      return !!(await ask(extras))
+      const answer = !!(await ask(extras))
+      stillHere()
+      return answer
     }
     // The question can stay open for minutes: what is applied is the server's copy once it
     // closes. Unreachable by then, the copy read before it stands — its revision is older than
     // the server's, so the next pull still brings in what changed.
     const reread = async () => {
       if (!asked) return
-      try { const r = await api('/api/data'); if (r && r.state) ({ state, rev } = r) } catch { /* the first read */ }
+      try { const r = await api('/api/data', { headers: ownerHeaders(who) }); stillHere(); if (r && r.state) ({ state, rev } = r) } catch { /* the first read */ }
+      stillHere()
     }
     const takeServer = () => {
+      stillHere()
       const copy = sanitizeAccent(Object.assign(clone(DEF), state))
       copy.active = carryActive(get().S, copy)
       if (rev != null) adopt(copy, rev)
@@ -1162,17 +1200,20 @@ export const useStore = create((set, get) => {
     const S0 = get().S
     if (!state) {
       const push = hasData(S0) && (!alwaysAsk || sameAccount || await askAbout(localExtras(S0, null)))
+      stillHere()
       releaseAdopt()
       if (hasData(get().S) && !push) {
         if (asked) await keepDeviceCopy()
         takeServer()
         await applyStash()
+        stillHere()
         return { adopted: true, added: false }
       }
       markOwed(false)
       if (push) { if (rev != null) writeSync(rev, 0); forceNext = true; await get().pushState() }
       else { if (rev != null) writeSync(rev, 0); confirmed(get().S) }
       await applyStash()
+      stillHere()
       return { adopted: false, added: false }
     }
     if (sameAccount) {
@@ -1189,11 +1230,13 @@ export const useStore = create((set, get) => {
       if (!hasData(S) || (!owed && base && !localChanged(S))) {
         takeServer()
         await applyStash()
+        stillHere()
         return { adopted: true, added: false, merged: false }
       }
       mergeInto(S, state, rev)
       await get().pushState()
       await applyStash()
+      stillHere()
       return { adopted: true, added: false, merged: true }
     }
     // The question is about what this copy held when the sign-in began (the marker's `pre`). What
@@ -1218,6 +1261,7 @@ export const useStore = create((set, get) => {
       else dropSync()
       await get().pushState()
       await applyStash()
+      stillHere()
       return { adopted: true, added: true }
     }
     const later = pre ? splitByPre(get().S, pre).later : null
@@ -1233,6 +1277,7 @@ export const useStore = create((set, get) => {
       await get().pushState()
     }
     await applyStash()
+    stillHere()
     return { adopted: true, added: false }
   }
   // A copy's workouts, weigh-ins and custom exercises split by the names a sign-in recorded when it
@@ -1298,7 +1343,10 @@ export const useStore = create((set, get) => {
 
   return {
     S: S0,
-    user: user0,
+      telegram: { status: telegramLaunch ? 'pending' : 'off', message: '' },
+      // main.jsx starts media sync at module startup too. A cached user must not authorize
+      // those background uploads while Telegram is still exchanging its current identity.
+      user: telegramLaunch ? null : user0,
     ready: false,
     // The connection as the screens show it — see statusOf above for every field.
     sync: sync0,
@@ -1379,13 +1427,16 @@ export const useStore = create((set, get) => {
     // reset loses exactly those, and keeps whatever else it holds, whatever its dates say.
     // Resolves once the server's names are in (or could not be had).
     resetEverything() {
+      if (telegramBlocked()) return Promise.resolve()
+      const who = identity()
       const cur = get().S
       const S = restartedState(cur)
       S.resetAt = Math.max(Date.now(), highestStamp(cur) + 1)
       S.resetIds = mergeResetIds(cur.resetIds, resetIdsOf(cur))
       get().replaceState(S, !!get().user)
       if (!get().user) return Promise.resolve()
-      return api('/api/data').then(res => {
+      return api('/api/data', { headers: ownerHeaders(who) }).then(res => {
+        if (!currentIdentity(who)) return
         const now = get().S
         if (!res?.state || now.resetAt !== S.resetAt) return
         const ids = mergeResetIds(now.resetIds, mergeResetIds(res.state.resetIds, resetIdsOf(res.state)))
@@ -1399,9 +1450,11 @@ export const useStore = create((set, get) => {
     // them in instead (importBackup). null when there are none, when nobody is signed in, or when
     // the server cannot be asked — the replace then goes as it always has.
     async importConflict(backup) {
-      if (!get().user) return null
+      if (!get().user || telegramBlocked()) return null
+      const who = identity()
       let res
-      try { res = await api('/api/data') } catch { return null }
+      try { res = await api('/api/data', { headers: ownerHeaders(who) }) } catch { return null }
+      if (!currentIdentity(who)) return null
       const state = res?.state
       importRead = { uid: get().user?.id, state: state || null, rev: res?.rev ?? null }
       if (!state) return null
@@ -1507,6 +1560,11 @@ export const useStore = create((set, get) => {
     // `adopt` (a sign-in, a pairing — { alwaysAsk } for a device link): adoptProfile follows and
     // decides what becomes of this copy; until it has, nothing is pulled or pushed (ADOPT_KEY).
     setUser(u, { adopt } = {}) {
+      if (telegramLaunch && get().telegram?.status === 'ready') {
+        if (u && u.id !== telegramUid) throw new Error('Telegram identity must be verified again')
+        if (!u) set({ ready: false, telegram: { status: 'error', message: 'Вы вышли из дневника. Для продолжения повторите вход через Telegram.' } })
+      }
+      if (get().user?.id !== u?.id) authEpoch++
       if (u) {
         // The local copy belongs to whoever last signed in here. When a session expires or is
         // revoked elsewhere, boot() only drops the user and the data stays; a different profile
@@ -1580,6 +1638,7 @@ export const useStore = create((set, get) => {
     // many asked), and the promise returned covers that follow-up too, so a caller that awaits
     // before signing out knows the last change is on the server.
     async pushState() {
+      if (telegramBlocked()) return
       if (!get().user) return
       clearTimeout(pushTm)
       pushTm = null
@@ -1595,13 +1654,17 @@ export const useStore = create((set, get) => {
     // in the debounce goes first — the server's answer is then the one that already includes it,
     // and the push itself is what catches a conflict.
     async pullState() {
+      if (telegramBlocked()) return
       if (adoptHold) return   // as pushState: adoptProfile reads the server itself
       if (pulling) return pulling
       pulling = (async () => {
+        const who = identity()
         try {
           if (pushTm) { clearTimeout(pushTm); pushTm = null; await get().pushState() }
           else if (pushing) await pushing
-          const res = await api('/api/data')
+          if (!currentIdentity(who)) return
+          const res = await api('/api/data', { headers: ownerHeaders(who) })
+          if (!currentIdentity(who)) return
           lastCheck = Date.now()
           reached()
           const { state, rev } = res
@@ -1645,7 +1708,7 @@ export const useStore = create((set, get) => {
           mergeInto(S, state, rev)
           pushPending = false
           await get().pushState()
-        } catch (e) { failed(e) /* keep local; the poll retries */ }
+        } catch (e) { if (currentIdentity(who)) failed(e) /* keep local; the poll retries */ }
         finally { pulling = null }
       })()
       return pulling
@@ -1833,8 +1896,57 @@ export const useStore = create((set, get) => {
       await mediaStore.clearAll().catch(() => {})
     },
 
+    // The Mini App must replace any old cookie BEFORE /me, sync, or the saved user's screens.
+    // One exchange even when React StrictMode runs the boot effect twice. A failed attempt is
+    // retried only by the barrier button; it never falls through to the previous browser login.
+    bootTelegram() {
+      if (telegramBoot) return telegramBoot
+      if (get().telegram.status === 'ready' && get().user?.id === telegramUid && readOwner() === telegramUid) return Promise.resolve()
+      set({ ready: false, telegram: { status: 'pending', message: '' } })
+      clearTimeout(pushTm); pushTm = null; pushAgain = false
+      get().setUser(null)
+      telegramBoot = (async () => {
+        try {
+          await Promise.allSettled([pushing, pulling].filter(Boolean))
+          const sdk = await loadTelegram()
+          telegramCleanup?.(); telegramCleanup = prepareTelegram(sdk)
+          const cfg = await get().loadConfig()
+          if (cfg?.telegram_login === false) throw Object.assign(new Error('disabled'), { status: 503 })
+          const res = await api('/api/telegram/login', { method: 'POST', body: JSON.stringify({ initData: sdk.initData }) })
+          if (!res.user?.id || typeof res.user.id !== 'string') throw new Error('bad-response')
+          if (readOwner() !== res.user.id) await stopTimers()
+          // The guest is not the Telegram identity. Keep its copy for manual export/import;
+          // even an active workout must not be silently carried into a new empty profile.
+          if (!readOwner() && (hasData(get().S) || get().S.active)) {
+            const all = await readStashes()
+            const uid = 'device-' + Date.now().toString(36)
+            all[stashKey(serverBase(), uid)] = { server: serverBase(), uid, name: t('This device, before signing in'), at: Date.now(), state: clone(get().S) }
+            if (!await writeStashes(all)) throw new Error('Не удалось сохранить локальные записи. Освободите память устройства и повторите вход.')
+            forgetSync()
+            persist(restartedState(get().S), false, false)
+          }
+          telegramUid = res.user.id
+          get().setUser(res.user, { adopt: { alwaysAsk: true } })
+          const who = identity()
+          set({ telegram: { status: 'adopting', message: '' } })
+          // Guest import is deliberately opt-in later, via the ordinary backup tools.
+          await get().adoptProfile(async () => false, { alwaysAsk: true })
+          if (!currentIdentity(who)) throw new Error('account changed')
+          await get().loadConfig()
+          if (!currentIdentity(who)) throw new Error('account changed')
+          set({ telegram: { status: 'ready', message: '' } })
+          finishBoot()
+        } catch (e) {
+          get().setUser(null)
+          set({ ready: false, telegram: { status: 'error', message: telegramError(e) } })
+        }
+      })().finally(() => { telegramBoot = null })
+      return telegramBoot
+    },
+
     // Boot: ask the server who we are, then pull.
     async boot() {
+      if (telegramLaunch) return get().bootTelegram()
       // Mobile build: no backend by default — restore from the file mirror (the durable copy;
       // localStorage may have been evicted since the last run) and go straight in. Unless this
       // device was paired to a server ("connect to my server" mode, lib/remote.js), in which

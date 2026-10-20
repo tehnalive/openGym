@@ -41,6 +41,10 @@ on your phone, synced across your devices, behind your own passkey login.
 </tr>
 </table>
 
+## Telegram Mini App adaptation
+
+This personal fork adds Telegram `initData` authentication, a private `/start` bot launcher, and a Docker/Caddy setup for a Telegram Mini App. The upstream `main` branch stays available for updates; the adaptation is developed on [`telegram-mini-app`](https://github.com/tehnalive/openGym/tree/telegram-mini-app). Setup and update instructions are in [integration/LOCAL_DEV.md](integration/LOCAL_DEV.md) and [UPSTREAM.md](UPSTREAM.md). The Telegram bot token belongs only in the server-side `.env` file.
+
 ## Why openGym
 
 Most workout apps keep your data on their servers, push you towards a subscription, or vanish

@@ -248,6 +248,8 @@ function Shell() {
 
 export default function App() {
   const boot = useStore(s => s.boot)
+  const telegram = useStore(s => s.telegram)
+  const retryTelegram = useStore(s => s.bootTelegram)
   useEffect(() => { boot() }, [boot])
   // Android system back — sheet, then page, then press-again-to-exit (see lib/back.js)
   useEffect(() => {
@@ -255,5 +257,16 @@ export default function App() {
     initBackButton().then(fn => { if (gone) fn(); else stop = fn })
     return () => { gone = true; stop?.() }
   }, [])
+  // Keep Shell unmounted: its effects, stored user and history belong to the old browser
+  // session until the Mini App has established the current Telegram identity.
+  if (telegram && !['off', 'ready'].includes(telegram.status)) return (
+    <main lang="ru" className="telegram-entry" aria-busy={telegram.status !== 'error'}>
+      <h1>openGym</h1>
+      {telegram.status === 'error' ? <>
+        <p role="alert">{telegram.message}</p>
+        <button className="btn primary" onClick={() => retryTelegram()}>Повторить вход</button>
+      </> : <p role="status">Подключаем ваш дневник через Telegram…</p>}
+    </main>
+  )
   return <HashRouter><Shell /></HashRouter>
 }

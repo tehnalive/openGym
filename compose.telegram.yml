@@ -1,0 +1,80 @@
+name: opengym-telegram
+
+services:
+  api:
+    image: opengym-telegram-api:local
+    build:
+      context: ./api
+      target: default
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATA_DIR: /data
+      RP_ID: ${APP_HOST:-localhost}
+      ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      RP_NAME: openGym
+      TRUST_PROXY: 1
+      INVITE_ONLY: ${INVITE_ONLY:-1}
+      ALLOW_GUEST: ${ALLOW_GUEST:-0}
+      PASSWORD_LOGIN: ${PASSWORD_LOGIN:-0}
+      FIRST_USER_ADMIN: ${FIRST_USER_ADMIN:-0}
+      COACH_DISABLED: 1
+      # Personal media sync needs additional owner-bound transport checks before enabling.
+      MEDIA_UPLOADS: 0
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_IDS: ${TELEGRAM_ALLOWED_IDS:-NOT_CONFIGURED}
+    volumes:
+      - ./data:/data
+
+  web:
+    image: opengym-telegram-web:local
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        APP_BUILD: telegram-e348fc1
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    environment:
+      NGINX_PORT: 80
+      BACKEND: api
+      PORT: 3000
+      RESOLVER: 127.0.0.11
+      CF_CONNECTING_IP: ""
+      BASE_PATH: ""
+      MEDIA_UPLOAD_MAX: 48m
+
+  bot:
+    profiles: [telegram]
+    build:
+      context: ./integration
+    restart: on-failure:3
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_MINI_APP_URL: ${TELEGRAM_MINI_APP_URL:-}
+      TELEGRAM_ALLOWED_IDS: ${TELEGRAM_ALLOWED_IDS:-NOT_CONFIGURED}
+
+  caddy:
+    profiles: [https]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_HOST: ${APP_HOST:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./integration/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

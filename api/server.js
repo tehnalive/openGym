@@ -35,6 +35,7 @@ import { effectiveRoutineId } from './queue.js';
 import { stampPut } from './sync-stamps.js';
 import { atomicWrite as durableWrite } from './durable.js';
 import { excusedOn, nudgeFor, nudgeWindowOpen, toneOf } from './nudge.js';
+import { validateTelegramInitData, TelegramAuthError } from './telegram-auth.mjs';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -70,6 +71,25 @@ const ALLOW_GUEST = !/^(0|false|no|off)$/i.test(process.env.ALLOW_GUEST || '');
 // every account that opts in, so an instance has to ask for it. While it is off every password
 // route answers 404 and the app shows none of it; hashes already stored stay where they are.
 const PASSWORD_LOGIN = /^(1|true|yes|on)$/i.test(process.env.PASSWORD_LOGIN || '');
+// Secret is read only from the server environment. A malformed allowlist disables this
+// entrance entirely instead of silently turning a private instance into open registration.
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_TOKEN_VALID = TELEGRAM_BOT_TOKEN.length <= 256
+  && TELEGRAM_BOT_TOKEN.trim() === TELEGRAM_BOT_TOKEN
+  && /^[1-9][0-9]*:[A-Za-z0-9_-]{20,128}$/.test(TELEGRAM_BOT_TOKEN);
+const telegramAllowlist = (() => {
+  const raw = process.env.TELEGRAM_ALLOWED_IDS;
+  // Only an absent variable opts into public Telegram registration (when INVITE_ONLY=0).
+  // A present-but-empty value is usually a deployment mistake: never interpret it as public.
+  if (raw === undefined) return { valid: true, ids: new Set() };
+  if (!raw.trim()) return { valid: false, ids: new Set() };
+  if (raw.length > 16384) return { valid: false, ids: new Set() };
+  const values = raw.split(',').map(value => value.trim());
+  const valid = values.length <= 1000 && values.every(value =>
+    /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)));
+  return { valid, ids: new Set(valid ? values : []) };
+})();
+const TELEGRAM_LOGIN = TELEGRAM_TOKEN_VALID && telegramAllowlist.valid;
 // The language the sign-in screen, and every profile that never picked one, starts in (#303) —
 // for an instance whose people share a language. Only a tag's shape is checked here; the app
 // matches it against the languages it has and ignores one it does not know. Unset, it is left
@@ -612,6 +632,16 @@ function sessionOf(req) {
 function readSession(req) {
   return sessionOf(req)?.user || null;
 }
+// Tabs share a cookie jar. A tab that captured profile A must not read/write profile B
+// after another tab signs in. Legacy clients without this opt-in header keep working.
+function stateIdentityMatches(req, res, user) {
+  const expected = req.headers['x-opengym-user'];
+  if (expected !== undefined && expected !== user.id) {
+    json(res, 409, { error: 'Account changed', code: 'account-changed' });
+    return false;
+  }
+  return true;
+}
 // Guard for /api/admin/* — resolves the caller and 401/403s if they aren't an admin.
 function requireAdmin(req, res) {
   const user = readSession(req);
@@ -948,6 +978,7 @@ setInterval(() => { AUTH_BURST.sweep(); ADDR_FAILS.sweep(); ACCOUNT_FAILS.sweep(
 // Route -> the kind of failure it can count. Every route listed here also spends the burst
 // budget; `null` spends only that.
 const THROTTLED = {
+  'POST /api/telegram/login': 'telegram',
   'POST /api/login/password': 'password', 'POST /api/login/password-reset': 'password',
   'POST /api/register/password': 'signup',
   'POST /api/account/password': 'password', 'DELETE /api/account/password': null,
@@ -1934,6 +1965,7 @@ const routes = {
     // that has no Coach. The key's absence is that answer.
     json(res, 200, {
       invite_only: INVITE_ONLY, allow_guest: ALLOW_GUEST,
+      ...(TELEGRAM_LOGIN ? { telegram_login: true } : {}),
       // Only when on, so an instance without passwords answers exactly as it did before (#118).
       ...(PASSWORD_LOGIN ? { password_login: true } : {}),
       // Public: the sign-in screen is the first thing that reads it.
@@ -1958,6 +1990,60 @@ const routes = {
     const { user } = s;
     const renew = s.bearer && s.exp - Date.now() < SESSION_DAYS * 86400000 / 2;
     json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) }, ...(renew ? { token: makeSession(user) } : {}) });
+  },
+
+  // The signed Telegram identity is a way into its own profile. Never link by a display
+  // name, e-mail, client uid, existing browser session, or unverified initDataUnsafe.
+  // This route intentionally keeps the normal same-origin CSRF policy.
+  'POST /api/telegram/login': async (req, res) => {
+    if (!TELEGRAM_LOGIN) return json(res, 403, { error: 'Telegram sign-in is unavailable', code: 'telegram-unavailable' });
+    const body = await readBody(req);
+    let identity;
+    try {
+      identity = await validateTelegramInitData(body.initData, TELEGRAM_BOT_TOKEN);
+    } catch (error) {
+      if (!(error instanceof TelegramAuthError)) throw error;
+      strikeAddress(req, 'telegram');
+      auditFail(req, 'auth.telegram.fail', { ok: false, msg: error.code });
+      return json(res, 401, { error: 'Telegram authentication failed', code: 'telegram-auth' });
+    }
+    const telegramId = String(identity.user.id);
+    if (telegramAllowlist.ids.size && !telegramAllowlist.ids.has(telegramId)) {
+      auditFail(req, 'auth.telegram.denied', { ok: false, msg: 'not-allowed' });
+      return json(res, 403, { error: 'Telegram account is not allowed', code: 'telegram-forbidden' });
+    }
+    // No await from identity lookup through save: concurrent first logins cannot create
+    // two records for the same Telegram identity. Ambiguous stored links fail closed.
+    const matches = db.users.filter(user => user.telegramId != null && String(user.telegramId) === telegramId);
+    if (matches.length > 1) return json(res, 403, { error: 'Telegram account is unavailable', code: 'telegram-forbidden' });
+    let user = matches[0];
+    if (user?.disabled) {
+      audit(req, 'auth.telegram.denied', { ok: false, user, msg: 'account-disabled' });
+      return json(res, 403, { error: 'this account has been disabled', code: 'disabled' });
+    }
+    if (!user) {
+      // An explicit allowlist grants admission, not admin. An empty list must not bypass
+      // INVITE_ONLY. Existing linked users can still sign in without making a new account.
+      if (INVITE_ONLY && !telegramAllowlist.ids.has(telegramId)) {
+        return json(res, 403, { error: 'Telegram sign-up requires an administrator allowlist', code: 'invite' });
+      }
+      const base = identity.user.first_name.normalize('NFKC')
+        .replace(/[^\p{L}\p{N} ._-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) || 'Telegram';
+      const taken = candidate => db.users.some(existing => nameKey(existing.name) === nameKey(candidate)
+        || existing.email === nameKey(candidate));
+      let name = base;
+      if (taken(name)) name = `${base.slice(0, 16)} · ${telegramId}`;
+      while (taken(name)) name = `${base.slice(0, 25)} · ${crypto.randomBytes(4).toString('hex')}`;
+      user = { id: crypto.randomBytes(12).toString('base64url'), name,
+        created: new Date().toISOString(), telegramId };
+      // Passkeys are separate records in db.creds; Telegram sign-up creates none.
+      claimFirstAdmin(req, user);
+      db.users.push(user);
+      saveDb();
+      audit(req, 'auth.telegram.register', { user });
+    }
+    audit(req, 'auth.telegram.ok', { user });
+    json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
   },
 
   'POST /api/register/options': async (req, res) => {
@@ -2174,6 +2260,7 @@ const routes = {
   'GET /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
     const state = readStateStrict(user.id);
     if (state === UNREADABLE) { console.error('state file unreadable for', user.id); return json(res, 503, { error: 'state unreadable' }); }
     notePull(user);
@@ -2188,6 +2275,7 @@ const routes = {
   'GET /api/data/rev': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
     const doc = readStateCached(user.id);
     json(res, 200, { rev: doc?._rev || 0, ...(doc?._wid ? { wid: doc._wid } : {}) });
   },
@@ -2195,6 +2283,7 @@ const routes = {
   'PUT /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
     const body = await readBody(req);
     if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
     // An object with nothing of the profile in it empties the document with the counter left
