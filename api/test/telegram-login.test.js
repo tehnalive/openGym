@@ -15,9 +15,9 @@ const ORIGIN = 'https://gym.example.test';
 const ALICE = 4_500_000_001;
 const BOB = 4_500_000_002;
 
-function initData(id = ALICE, { name = 'Аня', authDate = Math.floor(Date.now() / 1000), token = TOKEN } = {}) {
+function initData(id = ALICE, { name = 'Аня', authDate = Math.floor(Date.now() / 1000), token = TOKEN, photoUrl, username = 'same-name-does-not-link' } = {}) {
   const fields = new Map([
-    ['user', JSON.stringify({ id, first_name: name, username: 'same-name-does-not-link' })],
+    ['user', JSON.stringify({ id, first_name: name, username, ...(photoUrl === undefined ? {} : { photo_url: photoUrl }) })],
     ['query_id', 'test-query'], ['auth_date', String(authDate)],
   ]);
   const check = [...fields].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
@@ -68,6 +68,38 @@ async function start(t, { env = {}, users = [], creds = [], dir: existing } = {}
   });
   return { dir, call, login, stop, logs: () => tail, db: () => JSON.parse(fs.readFileSync(path.join(dir, 'db.json'), 'utf8')) };
 }
+
+test('signed Telegram photo follows its owner, refreshes and disappears when no longer shared', async t => {
+  const app = await start(t);
+  const photoUrl = 'https://t.me/i/userpic/320/signed-photo.svg';
+  const alice = await app.login(ALICE, { photoUrl, username: 'texno_liv' });
+  assert.equal(alice.body.user.avatarUrl, photoUrl);
+  assert.equal(alice.body.user.admin, false, 'a signed username is metadata, never an admin rule');
+  assert.equal((await app.call('/api/me', { cookie: alice.cookie })).body.user.avatarUrl, photoUrl);
+  assert.equal((await app.login(BOB)).body.user.avatarUrl, undefined);
+  assert.equal(app.db().users.find(u => u.id === alice.body.user.id).telegramUsername, 'texno_liv');
+  await app.stop();
+  const reopened = await start(t, { dir: app.dir });
+  assert.equal((await reopened.call('/api/me', { cookie: alice.cookie })).body.user.avatarUrl, photoUrl);
+  const changed = 'https://t.me/i/userpic/320/updated-photo.jpg';
+  assert.equal((await reopened.login(ALICE, { photoUrl: changed })).body.user.avatarUrl, changed);
+  const removed = await reopened.login(ALICE, {}, { photo_url: photoUrl, initDataUnsafe: { user: { photo_url: photoUrl } } });
+  assert.equal(removed.body.user.avatarUrl, undefined);
+  assert.equal((await reopened.call('/api/me', { cookie: removed.cookie })).body.user.avatarUrl, undefined);
+});
+
+test('unsafe optional photos fall back without fetching URLs or leaking the bot token', async t => {
+  const app = await start(t);
+  for (const photoUrl of ['javascript:alert(1)', 'data:image/svg+xml,<svg/>', 'http://t.me/a.jpg',
+    'https://evil.example/photo.jpg', 'https://t.me.evil.example/photo.jpg', 'https://user:password@t.me/photo.jpg',
+    'https://api.telegram.org/bot' + TOKEN + '/getFile', 'x'.repeat(2050)]) {
+    const response = await app.login(ALICE, { photoUrl });
+    assert.equal(response.status, 200);
+    // Credential-bearing Bot API URLs must never become avatar URLs, even on a Telegram host.
+    assert.equal(response.body.user.avatarUrl, undefined);
+  }
+  assert.ok(!app.logs().includes(TOKEN));
+});
 
 test('Telegram login creates normal isolated account, repeats same identity, survives restart', async t => {
   const app = await start(t);

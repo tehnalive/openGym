@@ -1,7 +1,7 @@
 {
-  "name": "openGym",
-  "short_name": "openGym",
-  "description": "Personal gym & body weight tracker",
+  "name": "Жимолость",
+  "short_name": "Жимолость",
+  "description": "Дневник тренировок и прогресса",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

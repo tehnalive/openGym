@@ -2094,6 +2094,7 @@ button.wl-summary{width:100%;padding:0 0 10px;text-align:start;border-radius:var
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));color:var(--label-2)}
 .sp-acct .lrow-t{font-size:19px;font-weight:600}
 .sp-avatar.on{background:var(--acc-soft);color:var(--acc);font-size:24px;font-weight:700}
+.sp-avatar img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
 .sp-version{text-align:center;margin-top:4px;line-height:1.6}
 /* The root rows' previews ("2:00 de descanso · Tarjetas", "Som · Vibração") are two or three facts, and a
    one-line ellipsis cut all but the first. They wrap instead, up to three lines, and never below

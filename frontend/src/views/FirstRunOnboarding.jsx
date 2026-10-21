@@ -13,7 +13,7 @@ import './FirstRunOnboarding.css'
 
 const COPY = {
   en: {
-    welcome: 'Welcome to openGym',
+    welcome: 'Welcome to Жимолость',
     intro: 'Keep your plan, workouts, and progress in one place. A couple of quick choices will make your diary ready to use.',
     begin: 'Set up my diary',
     settingsStep: 'Your training defaults',
@@ -36,12 +36,12 @@ const COPY = {
     later: 'Set this up later',
     back: 'Back',
     skip: 'Skip setup',
-    finish: 'Start using openGym',
+    finish: 'Start using Жимолость',
     invalid: 'Enter a valid weight, or leave this field blank.',
     tooHeavy: 'That weight is above the supported range for this unit.',
   },
   ru: {
-    welcome: 'Добро пожаловать в openGym',
+    welcome: 'Добро пожаловать в «Жимолость»',
     intro: 'План, тренировки и прогресс будут в одном месте. Пара быстрых настроек — и дневник готов к работе.',
     begin: 'Настроить дневник',
     settingsStep: 'Параметры тренировок',
@@ -170,7 +170,7 @@ export default function FirstRunOnboarding({ onFinish }) {
       <div className="first-run-card">
         {step === 0 && <div className="first-run-brand" aria-hidden="true"><Icon name="dumbbell" /></div>}
         {step === 0 ? <>
-          <div className="first-run-kicker">openGym</div>
+          <div className="first-run-kicker">Жимолость</div>
           <h1>{copy.welcome}</h1>
           <p className="first-run-lead">{copy.intro}</p>
           <Button variant="primary" onClick={() => setStep(1)}>{copy.begin}</Button>

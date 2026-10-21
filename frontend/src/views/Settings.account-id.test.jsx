@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   const state = { S: null, user: null, MOBILE: false }
   state.toast = vi.fn()
   state.snapshot = () => ({
-    S: state.S, user: state.user, coachLocal: null,
+    S: state.S, user: state.user, coachLocal: null, telegram: state.telegram,
     sync: { status: 'ok', offline: false, pending: false, auth: false, lastError: null, lastSynced: Date.now(), server: 'https://gym.example.com' },
     update: vi.fn(), replaceState: vi.fn(), setUser: vi.fn(), pullState: vi.fn(), pushState: vi.fn(), resetDemo: vi.fn(),
     syncNow: vi.fn(), unsyncedChanges: () => ({ owed: false, count: 0 }), keptChanges: async () => [],
@@ -70,6 +70,7 @@ let writeText
 beforeEach(() => {
   mocks.S = { unit: 'kg', restSec: 90, restPauseSec: 15, sound: false, effort: 'none', gifSize: 'full', workouts: [], routines: [], exWeights: {} }
   mocks.user = { id: ID, name: 'andi' }
+  mocks.telegram = { status: 'off' }
   mocks.MOBILE = false
   mocks.toast.mockClear()
   writeText = vi.fn(() => Promise.resolve())
@@ -78,6 +79,24 @@ beforeEach(() => {
 afterEach(() => { act(() => { mounted.splice(0).forEach(({ root, host }) => { root.unmount(); host.remove() }) }) })
 
 describe('Settings → Account ID', () => {
+  it('Telegram About has the new brand and attribution, without APK or PWA installation prompts', () => {
+    mocks.telegram = { status: 'ready' }
+    const page = mount(<Settings page="about" />)
+    expect(page.textContent).toContain('Жимолость')
+    expect(page.textContent).toContain('Сервис создан на основе openGym')
+    expect(page.textContent).toContain('Exercise media © Aliaksandr Makatserchyk')
+    expect(page.textContent).not.toMatch(/Get the Android app|Download the APK|Safari|Home Screen|Android app installs/)
+    expect(page.querySelector('a[href*="/#download"]')).toBeNull()
+  })
+
+  it('Telegram admin menu follows the server role, not the displayed account name', () => {
+    mocks.telegram = { status: 'ready' }
+    mocks.user = { id: ID, name: 'texno_liv', admin: false }
+    expect(mount(<Settings page="account" />).textContent).not.toContain('Admin dashboard')
+    mocks.user = { ...mocks.user, admin: true }
+    expect(mount(<Settings page="account" />).textContent).toContain('Admin dashboard')
+  })
+
   it('a signed-in browser shows the id under Account, and a tap copies it', async () => {
     const page = mount(<Settings page="account" />)
     const row = idRow(section(page, 'Account'))

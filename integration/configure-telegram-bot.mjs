@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const photoPath = fileURLToPath(new URL('./assets/gym-statsbot-avatar.jpg', import.meta.url));
-const description = 'Дневник тренировок: записывайте упражнения, подходы и веса, следите за прогрессом. Откройте приложение кнопкой ниже и войдите через Telegram.';
-const shortDescription = 'Дневник тренировок и прогресса: упражнения, подходы, повторы и веса.';
+const name = 'Жимолость';
+const description = 'Жимолость — дневник тренировок: записывайте упражнения, подходы и веса, следите за прогрессом. Откройте приложение кнопкой ниже и войдите через Telegram.';
+const shortDescription = 'Жимолость — дневник тренировок и прогресса: упражнения, подходы, повторы и веса.';
 const commands = [
   { command: 'start', description: 'Начать и открыть дневник' },
   { command: 'app', description: 'Открыть дневник тренировок' },
@@ -20,11 +21,11 @@ function checkConfig(token, miniAppUrl) {
   }
 }
 
-async function call(token, method, body, contentType = 'application/json') {
+async function call(token, method, body, contentType = 'application/json', fetchImpl = fetch) {
   let response;
   let result;
   try {
-    response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    response = await fetchImpl(`https://api.telegram.org/bot${token}/${method}`, {
       method: 'POST',
       headers: contentType ? { 'Content-Type': contentType } : undefined,
       body: body === undefined ? undefined : (contentType === 'application/json' ? JSON.stringify(body) : body),
@@ -40,51 +41,41 @@ async function call(token, method, body, contentType = 'application/json') {
   return result.result;
 }
 
-async function main() {
-  const envText = await readFile(new URL('../.env', import.meta.url), 'utf8');
-  const localEnv = Object.fromEntries(envText.split(/\r?\n/).flatMap(line => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) return [];
-    const separator = trimmed.indexOf('=');
-    if (separator < 1) return [];
-    const key = trimmed.slice(0, separator).trim();
-    let value = trimmed.slice(separator + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"'))
-      || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-    return [[key, value]];
-  }));
-  const token = process.env.TELEGRAM_BOT_TOKEN ?? localEnv.TELEGRAM_BOT_TOKEN;
-  const miniAppUrl = process.env.TELEGRAM_MINI_APP_URL ?? localEnv.TELEGRAM_MINI_APP_URL;
+export async function configureBot({ token, miniAppUrl, fetchImpl = fetch, logger = console }) {
+  const request = (method, body, contentType = 'application/json') => call(token, method, body, contentType, fetchImpl);
   checkConfig(token, miniAppUrl);
-  const bot = await call(token, 'getMe');
+  const bot = await request('getMe');
   if (bot?.username?.toLowerCase() !== 'gym_statsbot') {
     throw new Error('The configured token does not belong to @Gym_statsbot; no changes were applied.');
   }
 
-  await call(token, 'setMyProfilePhoto', await profilePhotoForm(), null);
-  console.log('Profile photo updated.');
-  await call(token, 'setMyDescription', { description, language_code: '' });
-  console.log('Bot description updated.');
-  await call(token, 'setMyShortDescription', { short_description: shortDescription, language_code: '' });
-  console.log('About text updated.');
-  await call(token, 'setMyCommands', { commands, language_code: '' });
-  console.log('Commands updated: /start, /app.');
-  await call(token, 'setChatMenuButton', { menu_button: {
+  await request('setMyName', { name, language_code: '' });
+  logger.log('Bot name updated.');
+  await request('setMyProfilePhoto', await profilePhotoForm(), null);
+  logger.log('Profile photo updated.');
+  await request('setMyDescription', { description, language_code: '' });
+  logger.log('Bot description updated.');
+  await request('setMyShortDescription', { short_description: shortDescription, language_code: '' });
+  logger.log('About text updated.');
+  await request('setMyCommands', { commands, language_code: '' });
+  logger.log('Commands updated: /start, /app.');
+  await request('setChatMenuButton', { menu_button: {
     type: 'web_app', text: 'Открыть дневник', web_app: { url: new URL(miniAppUrl).href },
   } });
-  console.log('Default Mini App menu button updated.');
+  logger.log('Default Mini App menu button updated.');
 
-  const actualDescription = await call(token, 'getMyDescription', { language_code: '' });
-  const actualShortDescription = await call(token, 'getMyShortDescription', { language_code: '' });
-  const actualCommands = await call(token, 'getMyCommands', { language_code: '' });
-  const actualMenu = await call(token, 'getChatMenuButton');
-  if (actualDescription?.description !== description
+  const actualName = await request('getMyName', { language_code: '' });
+  const actualDescription = await request('getMyDescription', { language_code: '' });
+  const actualShortDescription = await request('getMyShortDescription', { language_code: '' });
+  const actualCommands = await request('getMyCommands', { language_code: '' });
+  const actualMenu = await request('getChatMenuButton');
+  if (actualName?.name !== name || actualDescription?.description !== description
     || actualShortDescription?.short_description !== shortDescription
     || !Array.isArray(actualCommands) || actualCommands.map(item => item.command).join(',') !== 'start,app'
     || actualMenu?.type !== 'web_app' || actualMenu?.web_app?.url !== new URL(miniAppUrl).href) {
     throw new Error('Telegram accepted the settings but the read-back check did not match.');
   }
-  console.log('Telegram settings verified by read-back.');
+  logger.log('Telegram settings verified by read-back.');
 }
 
 async function profilePhotoForm() {
@@ -95,7 +86,25 @@ async function profilePhotoForm() {
   return form;
 }
 
-main().catch(error => {
-  console.error(error instanceof Error ? error.message : 'Bot configuration failed; details withheld.');
-  process.exitCode = 1;
-});
+async function main() {
+  const envText = await readFile(new URL('../.env', import.meta.url), 'utf8');
+  const localEnv = Object.fromEntries(envText.split(/\r?\n/).flatMap(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return [];
+    const separator = trimmed.indexOf('=');
+    if (separator < 1) return [];
+    const key = trimmed.slice(0, separator).trim();
+    let value = trimmed.slice(separator + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    return [[key, value]];
+  }));
+  await configureBot({ token: process.env.TELEGRAM_BOT_TOKEN ?? localEnv.TELEGRAM_BOT_TOKEN,
+    miniAppUrl: process.env.TELEGRAM_MINI_APP_URL ?? localEnv.TELEGRAM_MINI_APP_URL });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error(error instanceof Error ? error.message : 'Bot configuration failed; details withheld.');
+    process.exitCode = 1;
+  });
+}

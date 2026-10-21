@@ -179,7 +179,7 @@ describe('a strength workout as FIT', () => {
     expect(id[3]).toBeGreaterThan(0)              // serial, stable per workout
     expect(id[4]).toBe(fitTime(T0))
     expect(of(d, MSG.fileCreator)[0][0]).toBe(104)
-    expect(of(d, MSG.deviceInfo)[0][27]).toBe('openGym')
+    expect(of(d, MSG.deviceInfo)[0][27]).toBe('Жимолость')
     expect(decode(workoutFit(strength)).messages.find(m => m.global === MSG.fileId).f[3]).toBe(id[3])
   })
 
@@ -346,7 +346,7 @@ describe('categories and sports', () => {
   })
   it('names the file after the day and the start time', () => {
     const local = new Date(2026, 9, 9, 18, 5).getTime()
-    expect(fitFileName({ start: local })).toBe('opengym-2026-10-09-1805.fit')
-    expect(fitFileName({})).toBe('opengym-workout.fit')
+    expect(fitFileName({ start: local })).toBe('zhimolost-2026-10-09-1805.fit')
+    expect(fitFileName({})).toBe('zhimolost-workout.fit')
   })
 })

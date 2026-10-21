@@ -262,7 +262,7 @@ export default function App() {
   // session until the Mini App has established the current Telegram identity.
   if (telegram && !['off', 'ready'].includes(telegram.status)) return (
     <main lang="ru" className="telegram-entry" aria-busy={telegram.status !== 'error'}>
-      <h1>openGym</h1>
+      <h1>Жимолость</h1>
       {telegram.status === 'error' ? <>
         <p role="alert">{telegram.message}</p>
         <button className="btn primary" onClick={() => retryTelegram()}>Повторить вход</button>

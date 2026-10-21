@@ -35,7 +35,7 @@ import { effectiveRoutineId } from './queue.js';
 import { stampPut } from './sync-stamps.js';
 import { atomicWrite as durableWrite } from './durable.js';
 import { excusedOn, nudgeFor, nudgeWindowOpen, toneOf } from './nudge.js';
-import { validateTelegramInitData, TelegramAuthError } from './telegram-auth.mjs';
+import { validateTelegramInitData, TelegramAuthError, telegramPhotoUrl } from './telegram-auth.mjs';
 import {
   notificationState, previousWeekRange, publicNotificationPreferences, statsForWorkout,
   validNotificationPreferences, weekStart, weeklySummaryText, workoutNotificationText,
@@ -45,7 +45,7 @@ const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
 const RP_ID = process.env.RP_ID || 'localhost';
 const ORIGIN = process.env.ORIGIN || 'http://localhost:8080';
-const RP_NAME = process.env.RP_NAME || 'openGym';
+const RP_NAME = process.env.RP_NAME || 'Жимолость';
 // Admin dashboard (issue): admins are matched by uid (or the admin flag FIRST_USER_ADMIN sets);
 // INVITE_ONLY gates new signups behind a code the admin generates. Off by default, so a fresh
 // self-hosted instance stays open.
@@ -1207,7 +1207,8 @@ function loginTarget(body) {
 }
 const acctKey = u => 'acct:' + u.id;
 const passkeyCount = u => db.creds.filter(c => c.userId === u.id).length;
-const publicUser = u => ({ id: u.id, name: u.name, admin: isAdmin(u) });
+const publicUser = u => ({ id: u.id, name: u.name, admin: isAdmin(u),
+  ...(u.telegramId && telegramPhotoUrl(u.telegramPhotoUrl) ? { avatarUrl: telegramPhotoUrl(u.telegramPhotoUrl) } : {}) });
 const POLICY_ERRORS = {
   'too-short': `the password needs at least ${MIN_LENGTH} characters`,
   'too-long': `the password can have at most ${MAX_LENGTH} characters`,
@@ -2071,7 +2072,7 @@ const routes = {
     if (!s) return json(res, 401, { error: 'not signed in' });
     const { user } = s;
     const renew = s.bearer && s.exp - Date.now() < SESSION_DAYS * 86400000 / 2;
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) }, ...(renew ? { token: makeSession(user) } : {}) });
+    json(res, 200, { user: publicUser(user), ...(renew ? { token: makeSession(user) } : {}) });
   },
 
   // Preferences are stored on the Telegram-bound account, never on a caller-supplied chat id.
@@ -2119,6 +2120,7 @@ const routes = {
       return json(res, 401, { error: 'Telegram authentication failed', code: 'telegram-auth' });
     }
     const telegramId = String(identity.user.id);
+    const telegramProfile = { telegramUsername: identity.user.username || '', telegramPhotoUrl: identity.user.photo_url || '' };
     if (telegramAllowlist.ids.size && !telegramAllowlist.ids.has(telegramId)) {
       auditFail(req, 'auth.telegram.denied', { ok: false, msg: 'not-allowed' });
       return json(res, 403, { error: 'Telegram account is not allowed', code: 'telegram-forbidden' });
@@ -2146,12 +2148,18 @@ const routes = {
       if (taken(name)) name = `${base.slice(0, 16)} · ${telegramId}`;
       while (taken(name)) name = `${base.slice(0, 25)} · ${crypto.randomBytes(4).toString('hex')}`;
       user = { id: crypto.randomBytes(12).toString('base64url'), name,
-        created: new Date().toISOString(), telegramId };
+        created: new Date().toISOString(), telegramId, ...telegramProfile };
       // Passkeys are separate records in db.creds; Telegram sign-up creates none.
       claimFirstAdmin(req, user);
       db.users.push(user);
       saveDb();
       audit(req, 'auth.telegram.register', { user });
+    }
+    // Refresh only this signed identity's metadata; names never grant/link accounts or roles.
+    if (user.telegramUsername !== telegramProfile.telegramUsername || user.telegramPhotoUrl !== telegramProfile.telegramPhotoUrl) {
+      const previous = { telegramUsername: user.telegramUsername, telegramPhotoUrl: user.telegramPhotoUrl };
+      Object.assign(user, telegramProfile);
+      try { saveDb(); } catch (error) { Object.assign(user, previous); throw error; }
     }
     audit(req, 'auth.telegram.ok', { user });
     json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
@@ -2232,7 +2240,7 @@ const routes = {
     });
     saveDb();
     audit(req, 'auth.register.ok', { user, msg: invite ? invite.code : null });
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } }, { 'Set-Cookie': sessionCookie(user) });
+    json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
   },
 
   'POST /api/login/options': async (req, res) => {
@@ -2294,7 +2302,7 @@ const routes = {
       return json(res, 403, { error: 'this account has been disabled', code: 'disabled' });
     }
     audit(req, 'auth.login.ok', { user });
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } }, { 'Set-Cookie': sessionCookie(user) });
+    json(res, 200, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(user) });
   },
 
   // Reads the session purely so the sign-out can be recorded; the cookie is cleared either way.
@@ -2353,7 +2361,7 @@ const routes = {
       return json(res, 400, { error: 'invalid or expired code', code: 'pair-invalid' });
     }
     audit(req, 'auth.pair.ok', { user });
-    json(res, 200, { token: makeSession(user), user: { id: user.id, name: user.name, admin: isAdmin(user) } });
+    json(res, 200, { token: makeSession(user), user: publicUser(user) });
   },
 
   // Absent entirely while PASSWORD_LOGIN is off, so each of them is a plain 404.

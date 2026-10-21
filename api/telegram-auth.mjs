@@ -70,6 +70,18 @@ function readOptions(options) {
   return { nowSeconds, maxAgeSeconds, clockSkewSeconds };
 }
 
+// Avatar metadata is optional. Ignore unavailable/unsafe URLs without blocking a valid login.
+// Never fetch it server-side or expose a Bot API file URL containing the bot token.
+export function telegramPhotoUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048 || /[\s\x00-\x1f]/.test(value)) return '';
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port
+      && /(^|\.)(t\.me|telegram\.org)$/.test(url.hostname)
+      && !/(^|\.)api\.telegram\.org$/.test(url.hostname) ? url.href : '';
+  } catch { return ''; }
+}
+
 function sanitizeUser(raw) {
   let parsed;
   try { parsed = JSON.parse(raw); } catch { fail('INVALID_USER'); }
@@ -90,6 +102,8 @@ function sanitizeUser(raw) {
       user[field] = parsed[field];
     }
   }
+  const photo = telegramPhotoUrl(parsed.photo_url);
+  if (photo) user.photo_url = photo;
   return Object.freeze(user);
 }
 

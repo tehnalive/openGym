@@ -48,7 +48,7 @@ describe('first-run onboarding', () => {
 
   it('saves chosen settings and today’s optional weigh-in to the profile', async () => {
     await act(async () => { root.render(<FirstRunOnboarding />) })
-    expect(host.textContent).toContain('Добро пожаловать в openGym')
+    expect(host.textContent).toContain('Добро пожаловать в «Жимолость»')
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Настроить дневник'))
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'lb'))
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Female'))

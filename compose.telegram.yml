@@ -13,7 +13,7 @@ services:
       DATA_DIR: /data
       RP_ID: ${APP_HOST:-localhost}
       ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
-      RP_NAME: openGym
+      RP_NAME: Жимолость
       TRUST_PROXY: 1
       INVITE_ONLY: ${INVITE_ONLY:-1}
       ALLOW_GUEST: ${ALLOW_GUEST:-0}
@@ -34,7 +34,7 @@ services:
       context: .
       dockerfile: web/Dockerfile
       args:
-        APP_BUILD: telegram-20261021
+        APP_BUILD: telegram-20261022-zhimolost
     restart: unless-stopped
     depends_on:
       - api
