@@ -6,7 +6,7 @@
 // side: the sheets lift by it, the focused field is scrolled above it, and with no variable (older
 // Android, iOS, a browser) nothing changes.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { nativeKeyboardHeight, visibleBottom, revealAboveKeyboard, startNativeKeyboard, NATIVE_KEYBOARD_EVENT } from './native-keyboard.js'
 import { sheetKeyboardInsets } from './use-sheet-keyboard.js'
 
@@ -53,13 +53,16 @@ describe('the keyboard height the app passes', () => {
     expect(visibleBottom()).toBe(600)
   })
 
-  it('sheets lift by the larger of the visual-viewport inset and the native one', () => {
-    expect(sheetKeyboardInsets(window)).toEqual({ bottomInset: 0, visualHeight: 915 })
+  it('reports one keyboard-visible height for the modal root and sheets', () => {
+    expect(sheetKeyboardInsets(window)).toEqual({ visualHeight: 915 })
     setKeyboard(336)
-    expect(sheetKeyboardInsets(window)).toEqual({ bottomInset: 336, visualHeight: 579 })
+    expect(sheetKeyboardInsets(window)).toEqual({ visualHeight: 579 })
     setKeyboard(0)
     viewport.height = 600
-    expect(sheetKeyboardInsets(window)).toEqual({ bottomInset: 315, visualHeight: 600 })
+    expect(sheetKeyboardInsets(window)).toEqual({ visualHeight: 600 })
+    viewport.offsetTop = 40
+    viewport.height = 500
+    expect(sheetKeyboardInsets(window)).toEqual({ visualHeight: 500 })
   })
 })
 
@@ -111,9 +114,10 @@ describe('keeping the focused field above the keyboard', () => {
 
 describe('the two halves agree', () => {
   const css = read('../index.css')
-  const activity = read('../../android/app/src/main/java/ch/duartesantos/opengym/MainActivity.java')
+  const activityPath = new URL('../../android/app/src/main/java/ch/duartesantos/opengym/MainActivity.java', import.meta.url)
+  const activity = existsSync(activityPath) ? readFileSync(activityPath, 'utf8') : null
 
-  it('the app passes the IME inset as --native-kb and fires the event', () => {
+  it.skipIf(!activity)('the app passes the IME inset as --native-kb and fires the event', () => {
     expect(activity).toMatch(/WindowInsetsCompat\.Type\.ime\(\)/)
     expect(activity).toContain("'--native-kb'")
     expect(activity).toContain("data-native-kb")
@@ -122,10 +126,11 @@ describe('the two halves agree', () => {
     expect(activity).toMatch(/Build\.VERSION\.SDK_INT < 35/)
   })
 
-  it('every sheet stands on the keyboard and the picker takes the larger lift', () => {
-    expect(css).toMatch(/:root\[data-native-kb\] \.sheet\{\s*bottom:max\(var\(--picker-keyboard-bottom,0px\),var\(--native-kb,0px\)\);/)
-    expect(css).toMatch(/\.sheet:has\(\.picker-search\)\{\s*bottom:max\(var\(--picker-keyboard-bottom,0px\),var\(--native-kb,0px\)\);/)
-    expect(css).toMatch(/max-height:min\(90vh,calc\(100dvh - var\(--sat\) - 8px - var\(--native-kb,0px\)\)\)/)
+  it('the modal root owns keyboard geometry once for sheets and centered dialogs', () => {
+    expect(css).toMatch(/:root\[data-native-kb\] \.sheet\{\s*bottom:0;/)
+    expect(css).toMatch(/\.sheet:has\(\.picker-search\)\{\s*bottom:0;/)
+    expect(css).toMatch(/#modal-root\{position:fixed;top:0;left:0;width:100%;height:100vh;height:100dvh;/)
+    expect(css).toMatch(/max-height:calc\(var\(--modal-visual-height,100dvh\) - 2\*var\(--sat\) - 24px\);overflow-y:auto;/)
   })
 
   it('the tab bar is left under the keyboard', () => {

@@ -6,8 +6,8 @@
 
    MainActivity.keyboardScript passes the covered height as --native-kb on <html> (CSS pixels,
    0px when the keyboard is down), sets data-native-kb while it is up, and fires
-   'opengym:native-keyboard'. The stylesheet lifts sheets and pads the page by it; this module
-   keeps the focused field in view. Older Android versions still resize the window, never get
+   'opengym:native-keyboard'. The modal root caps its available height and the page adds bottom
+   padding; this module keeps the focused field in view. Older Android versions still resize the window, never get
    the variable, and read 0 here — nothing changes for them, nor in a browser or on iOS. */
 
 export const NATIVE_KEYBOARD_EVENT = 'opengym:native-keyboard'

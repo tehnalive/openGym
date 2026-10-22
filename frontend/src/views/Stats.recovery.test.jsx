@@ -526,7 +526,6 @@ describe('Stats exercise progress picker', () => {
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: { height: 300 } })
     input.focus()
     expect(sheet.style.getPropertyValue('--picker-visual-height')).toBe('300px')
-    expect(sheet.style.getPropertyValue('--picker-keyboard-bottom')).toBe(`${Math.max(0, window.innerHeight - 300)}px`)
     await setSearch('bench')
     await tick(100)
     expect(sheet.scrollTop).toBeGreaterThan(0)

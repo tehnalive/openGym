@@ -360,8 +360,7 @@ function SelectSheet({ title, value, options, onChange, search, close }) {
     const viewport = window.visualViewport
     if (!sheet || !viewport) return
     // the visual viewport, or on Android 15 the keyboard the app passes (lib/native-keyboard.js)
-    const { bottomInset, visualHeight } = sheetKeyboardInsets(window)
-    sheet.style.setProperty('--picker-keyboard-bottom', `${bottomInset}px`)
+    const { visualHeight } = sheetKeyboardInsets(window)
     sheet.style.setProperty('--picker-visual-height', `${visualHeight}px`)
   }, [])
   const matcher = typeof search === 'function' ? search : search?.match
@@ -381,7 +380,6 @@ function SelectSheet({ title, value, options, onChange, search, close }) {
       viewport.removeEventListener('scroll', sync)
       window.removeEventListener(NATIVE_KEYBOARD_EVENT, sync)
       const sheet = inputRef.current?.closest('.sheet')
-      sheet?.style.removeProperty('--picker-keyboard-bottom')
       sheet?.style.removeProperty('--picker-visual-height')
     }
   }, [search, syncPickerViewport])

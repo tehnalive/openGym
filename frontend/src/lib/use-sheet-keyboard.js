@@ -1,28 +1,27 @@
 import { useCallback, useEffect } from 'react'
 import { nativeKeyboardHeight, NATIVE_KEYBOARD_EVENT } from './native-keyboard.js'
 
-/* How far the keyboard reaches up the layout viewport, and the height left above it. */
+/* The modal root follows the keyboard-visible viewport (components/Modals.jsx), including the
+   native Android 15 IME measurement. Sheets therefore need no second bottom inset. */
 export function sheetKeyboardInsets(win) {
   const viewport = win.visualViewport
   const native = nativeKeyboardHeight(win.document)
-  const vh = Math.max(0, viewport?.height || win.innerHeight)
-  const visualBottom = (viewport?.offsetTop || 0) + vh
-  const bottomInset = Math.max(0, win.innerHeight - visualBottom, native)
-  const visualHeight = Math.max(0, Math.min(vh, win.innerHeight - native))
-  return { bottomInset, visualHeight }
+  const top = Math.max(0, viewport?.offsetTop || 0)
+  const height = Math.max(0, viewport?.height || win.innerHeight)
+  const visibleBottom = Math.min(top + height, win.innerHeight - native)
+  const visualHeight = Math.max(0, visibleBottom - top)
+  return { visualHeight }
 }
 
-/* Keyboard-aware sheets. When the mobile keyboard comes up the layout viewport keeps its
-   size, only the visual viewport shrinks — so a bottom sheet with a text input near its
-   foot ends up half under the keys. index.css reads two custom properties on the sheet
-   (--picker-keyboard-bottom / --picker-visual-height) to lift and cap it. SelectSheet in
-   components/ui.jsx does the same sync inline; the exercise picker, the custom-exercise
-   form and the note sheets need it too, hence this hook. Both measure with
-   sheetKeyboardInsets below.
+/* Keyboard-aware sheets. Modals.jsx syncs the modal root to visualViewport, including the
+   position correction needed by iOS WKWebView. This hook keeps the search sheet's height current
+   while the viewport changes. SelectSheet in components/ui.jsx
+   does the same sync inline; the exercise picker, custom-exercise form and note sheets use this
+   hook so their keyboard-aware layout follows the same measurements below.
 
    On Android 15 the visual viewport does not shrink either (the app is edge to edge, so
-   adjustResize has no effect); there the app passes the keyboard as --native-kb
-   (lib/native-keyboard.js) and the larger of the two wins.
+   adjustResize has no effect); the modal root accounts for --native-kb once and the sheet
+   follows that smaller containing block.
 
    `inputRef` points at the text input (or textarea) whose closest `.sheet` gets the vars.
    `enabled` lets a caller switch the sync off (e.g. a picker without a search box). */
@@ -32,8 +31,7 @@ export function useSheetKeyboard(inputRef, enabled = true) {
     const sheet = input?.closest?.('.sheet')
     const viewport = typeof window !== 'undefined' ? window.visualViewport : null
     if (!sheet || !viewport) return
-    const { bottomInset, visualHeight } = sheetKeyboardInsets(window)
-    sheet.style.setProperty('--picker-keyboard-bottom', `${bottomInset}px`)
+    const { visualHeight } = sheetKeyboardInsets(window)
     sheet.style.setProperty('--picker-visual-height', `${visualHeight}px`)
   }, [inputRef])
 
@@ -52,7 +50,6 @@ export function useSheetKeyboard(inputRef, enabled = true) {
       // The sheet element outlives this input when the sheet swaps content, so leave it
       // the way we found it rather than pinning a stale keyboard inset on it.
       const sheet = inputRef.current?.closest?.('.sheet')
-      sheet?.style.removeProperty('--picker-keyboard-bottom')
       sheet?.style.removeProperty('--picker-visual-height')
     }
   }, [enabled, sync, inputRef])

@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useUI } from '../store/useUI.js'
 import { keyboardOpen } from '../lib/viewport-guard.js'
+import { NATIVE_KEYBOARD_EVENT } from '../lib/native-keyboard.js'
+import { sheetKeyboardInsets } from '../lib/use-sheet-keyboard.js'
 
 // Putting the page back after a sheet closes takes up to three goes (see the un-pin below): now,
 // next frame, and once the keyboard's dismiss animation is over. Anything else that wants to
@@ -209,6 +211,53 @@ export default function Modals() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [sheets.length])
+  // WKWebView on some iOS 26 devices can render position:fixed overlays at the wrong
+  // coordinates while the keyboard pans the visual viewport. Give the modal root the
+  // viewport's measured box explicitly so the sheet and backdrop stay with the visible area.
+  useLayoutEffect(() => {
+    if (!sheets.length) return
+    const modal = document.getElementById('modal-root')
+    if (!modal) return
+    const win = window
+    const viewport = win.visualViewport
+    let frame = 0
+    let settleTimer = 0
+    const measure = () => {
+      const vv = win.visualViewport
+      const top = Number.isFinite(vv?.offsetTop) ? vv.offsetTop : 0
+      const left = Number.isFinite(vv?.offsetLeft) ? vv.offsetLeft : 0
+      const width = Number.isFinite(vv?.width) && vv.width > 0 ? vv.width : win.innerWidth
+      const { visualHeight: height } = sheetKeyboardInsets(win)
+      modal.style.top = `${top}px`
+      modal.style.left = `${left}px`
+      modal.style.width = `${width}px`
+      modal.style.height = `${height}px`
+      modal.style.setProperty('--modal-visual-height', `${height}px`)
+    }
+    const sync = () => {
+      measure()
+      // WebKit can publish the keyboard's viewport offset one frame after its event.
+      if (win.requestAnimationFrame) {
+        if (frame && win.cancelAnimationFrame) win.cancelAnimationFrame(frame)
+        frame = win.requestAnimationFrame(() => { frame = 0; measure() })
+      }
+      if (settleTimer) win.clearTimeout(settleTimer)
+      settleTimer = win.setTimeout(() => { settleTimer = 0; measure() }, 50)
+    }
+    measure()
+    viewport?.addEventListener?.('resize', sync)
+    viewport?.addEventListener?.('scroll', sync)
+    win.addEventListener('resize', sync)
+    win.addEventListener(NATIVE_KEYBOARD_EVENT, sync)
+    return () => {
+      viewport?.removeEventListener?.('resize', sync)
+      viewport?.removeEventListener?.('scroll', sync)
+      win.removeEventListener('resize', sync)
+      win.removeEventListener(NATIVE_KEYBOARD_EVENT, sync)
+      if (frame && win.cancelAnimationFrame) win.cancelAnimationFrame(frame)
+      if (settleTimer) win.clearTimeout(settleTimer)
+    }
+  }, [sheets.length > 0])
   // A layout effect, not a passive one: the pin and, above all, the un-pin plus the scroll
   // restore have to land in the same frame as the sheet's own mount/unmount. Run after paint,
   // iOS showed a frame with the body un-pinned at scroll 0 — the page "jumped down and back" on

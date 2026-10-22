@@ -1490,7 +1490,7 @@ body.no-tabbar #timer.working{box-shadow:inset 0 var(--hair) 0 var(--acc),0 -10p
 }
 
 /* ---------------------------------------------------------------- modal -- */
-#modal-root{position:fixed;inset:0;z-index:100;display:none}
+#modal-root{position:fixed;top:0;left:0;width:100%;height:100vh;height:100dvh;z-index:100;display:none}
 #modal-root.open{display:block}
 .mback{
   position:absolute;inset:0;background:rgba(0,0,0,.4);
@@ -1503,23 +1503,23 @@ body.no-tabbar #timer.working{box-shadow:inset 0 var(--hair) 0 var(--acc),0 -10p
   padding:8px 18px calc(20px + var(--sab));
   /* A tall sheet stops short of the status bar / Dynamic Island: every cap carries the top
      safe-area inset, which the layout viewport does not (viewport-fit=cover). */
-  max-height:90vh;max-height:min(90vh,calc(100dvh - var(--sat) - 8px - var(--native-kb,0px)));
+  max-height:90vh;max-height:min(90vh,calc(var(--modal-visual-height,100dvh) - var(--sat) - 8px));
   overflow-y:auto;scroll-padding-bottom:calc(20px + var(--sab));
   animation:sheetup .34s var(--ease);
   overscroll-behavior:contain;touch-action:pan-y;will-change:transform;
 }
 .sheet:has(.picker-search){
-  bottom:max(var(--picker-keyboard-bottom,0px),var(--native-kb,0px));
+  bottom:0;
   /* with the keyboard up the sheet is capped by the visual viewport — which still starts
      under the notch, hence the inset here too */
-  max-height:min(90vh,calc(100dvh - var(--sat) - 8px - var(--native-kb,0px)),calc(var(--picker-visual-height,100vh) - var(--sat) - 8px));
+  max-height:min(90vh,calc(var(--modal-visual-height,100dvh) - var(--sat) - 8px),calc(var(--picker-visual-height,var(--modal-visual-height,100dvh)) - var(--sat) - 8px));
 }
-/* Android 15: the window is not resized for the soft keyboard, the app passes the height it
-   covers as --native-kb instead (MainActivity.keyboardScript, lib/native-keyboard.js). Every
-   sheet stands on the keyboard, and its foot drops the navigation-bar inset, which the keyboard
-   already covers. Older Android versions resize the window and never set the variable. */
+/* Android 15: the window is not resized for the soft keyboard, so the modal root uses the height
+   passed as --native-kb (MainActivity.keyboardScript, lib/native-keyboard.js). The sheet drops the
+   navigation-bar inset from its foot because the keyboard already covers that area. Older Android
+   versions resize the window and never set the variable. */
 :root[data-native-kb] .sheet{
-  bottom:max(var(--picker-keyboard-bottom,0px),var(--native-kb,0px));
+  bottom:0;
   padding-bottom:20px;scroll-padding-bottom:20px;
 }
 :root[data-theme="light"] .sheet{background:var(--bg)}
@@ -1534,16 +1534,11 @@ body.no-tabbar #timer.working{box-shadow:inset 0 var(--hair) 0 var(--acc),0 -10p
 .center{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:min(84vw,300px);background:var(--bg-el);border-radius:var(--r-lg);padding:20px;
-  max-height:calc(100dvh - 2*var(--sat) - 24px);overflow-y:auto;
+  max-height:calc(var(--modal-visual-height,100dvh) - 2*var(--sat) - 24px);overflow-y:auto;
   box-shadow:0 20px 60px -12px rgba(0,0,0,.5);
   animation:pop .28s var(--ease);
 }
 :root[data-theme="light"] .center{background:#fff}
-/* a dialog with a field centres in what the Android 15 keyboard leaves */
-:root[data-native-kb] .center{
-  top:calc((100% - var(--native-kb)) / 2);
-  max-height:calc(100dvh - var(--native-kb) - 2*var(--sat) - 24px);
-}
 @keyframes pop{from{transform:translate(-50%,-50%) scale(.94);opacity:0}to{transform:translate(-50%,-50%) scale(1);opacity:1}}
 
 /* --- RIR/RPE conversion table (effort help sheet) ---
