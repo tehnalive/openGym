@@ -1,19 +1,19 @@
 # Roadmap
 
-Where openGym is going, in the order it is likely to land. Each block is a GitHub milestone; the
-issues and pull requests attached to it are the plan, this file is the readable summary.
+Where openGym is going, in the order it is likely to land. The next two releases are planned in
+detail; everything after that is a list in rough order, and any date on it is a guess. The GitHub
+milestones and the issues in them are the working plan, this file is the readable summary.
 
-**A release every two weeks, on a Sunday.** Each one is small on purpose: a handful of issues, one
-theme, so a version is out before the branch has drifted and every fix reaches phones within a
-fortnight. Whatever is not merged and tested on gym-test by the Friday before rolls into the next
-block, the date does not move. Version numbers follow the release rule, not the size of the change:
-the next release is the last published one plus one patch (1.3.7 → 1.3.8), and a minor bump is
-reserved for a step as big as the new exercise database (v1.4.0).
+**A release roughly every one to two weeks.** Each one bundles whatever has been merged and tested
+on gym-test by then, so a fix reaches phones quickly and a branch never drifts for a month. Store
+builds add a few days of App Review on top, which is why a version can be "done" before it is out.
+Version numbers follow the release rule, not the size of the change: the next release is the last
+published one plus one patch (1.4.2 → 1.4.3), and a minor bump is saved for a step as big as the
+new exercise database (v1.4.0).
 
-- Milestones: https://github.com/DuarteSantos8/openGym/milestones (every open issue sits in exactly one)
-- Tracks, in order: the new exercise database with the community round (v1.4.0) → programmes → the
-  progression engine → cardio → sharing and gyms → accounts → the iOS app → Android and health →
-  looks and social, with database storage after that
+- Milestones: https://github.com/DuarteSantos8/openGym/milestones
+- Next, in order: the community release (v1.4.3, released 2026-10-26) → programmes and the Coach fix
+  (v1.4.4) → remote MCP and Google Play (v1.4.5) → the list after that
 
 ---
 
@@ -149,85 +149,85 @@ server.
 - Still open from the old v1.3.12 list: the timer rework (#165), a home-screen widget (#299) and
   distance for cardio (#177), now in their own milestones below
 
-## v1.4.1: Programmes & phases  (2026-11-29)
+## v1.4.1: Bug fixes for v1.4.0  (released 2026-10-10)
 
-- Programmes: routines grouped into a named block over weeks, with deload and rest weeks, several
-  per profile (#159, GitLab !98; Discord "Programme mode", "folders", "major good ideas" 1)
-- Session phases (mobility / work / accessory / cooldown) with completion-only exercises for
-  stretching that stay out of volume and PRs (#57, #140; Discord "non-typed exercises")
+The animations come back as WebP, and the Android update check reads GitHub.
 
-## v1.4.2: Progression engine I  (2026-12-13)
+## v1.4.2: openGym in the App Store  (released 2026-10-23)
 
-- Rep or set ranges per set and AMRAP targets beyond the "to failure" flag (#154; Discord "More
-  types of sets"); the flag itself and triple progression came early in v1.4.0 (#179)
-- Assisted exercises as negative added weight (#176); the multi-formula 1RM came in v1.4.0 (#155)
+- The iPhone app in the App Store, with an Apple Watch app, widgets, a Live Activity and Apple
+  Health (#90, #125 on iOS)
+- Animation quality to pick: built in 180 px, or 240 to 1080 px downloaded from the store
+- Three APK sizes on GitHub: Standard, Plus and HD
+- Your bars, rest between warm-ups and between sides, backups for an exercise, the boot screen,
+  five reported security holes closed
 
-## v1.4.3: Progression engine II  (2026-12-27)
+## v1.4.3: The community release  (released 2026-10-26, a week early)
 
-- Load as %1RM or auto with a stored training max, target RPE/RIR (#153)
-- Wave / percentage progression, 5/3/1 style (#70; PR #168)
-- A warm-up generator that picks the ramp from load and lift (#156)
-- Periodisation extras on top: mesocycle blocks, auto-regulation on RPE (#120)
+Most of it was asked for on GitHub and Discord or sent in as a pull request. The full list is in
+the changelog; the headlines:
 
-## v1.4.4: Cardio, alternatives, groups  (2027-01-10)
+- A Halloween costume until 1 November (spiders, bats, a witch, a skeleton on Stats), and nine
+  app icons to pick from on iPhone, a Halloween one included
+- openGym starts again on iOS 15.5 to 16.3, where 1.4.2 sat on the splash screen forever
+- Gym reminder: a nudge when you walk into your gym, gyms stay on the phone (#614)
+- A tiny muscle map on every routine and in the workout (#670); volume while you lift (#774)
+- CSV export and GymMane import (#647); keep an exercise you added mid-workout (#592)
+- Backups per routine slot for when the machine is taken (#649), weight stacks for machines with
+  odd steps (#688), rest after a single set (#609), rest days in the rotation (#536)
+- Heart rate and weigh-ins read back from Apple Health and Health Connect (#544, #127)
+- The Apple Watch learns RPE, a countdown, Water Lock and proper Discard (#776, #783, #789 to
+  #791); next exercise and Skip rest on the Lock Screen
+- The Coach answers questions and plans into the rotation (#778, #779); Swedish, and Spanish
+  from Spain (#786); the MCP server can log a workout (#739)
 
-- Cardio: intervals (rounds × work/rest), interval programmes such as C25k, rucking as distance +
-  pace + load, distance for cardio (#132, #169, #177; Discord "cardio programs", "rucking");
-  treadmill incline came early in v1.4.0
-- Exercise alternatives per routine slot (Discord); Replace in the routine editor came in v1.3.9
-  (#110)
-- Complexes and interval groups beside supersets (Discord)
+## v1.4.4: Programmes  (in progress, about two weeks after v1.4.3)
 
-## v1.4.5: Sharing, gyms, admin  (2027-01-24)
+- **Programmes**: routines grouped into a block over several weeks, with targets as %1RM or RPE
+  per week, deloads included (#159, #679)
+- The Coach works again with OpenAI-compatible endpoints that answered HTTP 400 (#804)
+- Your own app icon, on iPhone and Android
+- kg or lb per exercise, for the one dumbbell rack that lives in pounds (#657)
+- Body weight in pull-up and dip volume, as a switch, because it changes every number (#794)
+- The catalogue files each exercise under the muscle it is known for, so fatigue and balance shift
+  a little for everyone (#788, thanks @lodepav)
+- Timed sets that start themselves after the rest, and superset intervals (#626)
+- The Apple Watch redesign by @cubetes, one screen per pull request (Discussion #777)
 
-- Search itself was rebuilt in v1.4.0 (#192); left here: searching your own history and import
-  aliases by name
-- Shared custom exercises between accounts on one instance (#151)
-- "Different gyms": a location on a logged set, separate histories and PRs per location, bodyweight
-  shared (Discord "How to deal with different gyms")
-- Admin: per-user export, invite management, audit log filters
+## v1.4.5: Remote MCP & Google Play  (planned for the second half of November)
 
-## v1.4.6: Accounts: password & OIDC  (2027-02-07)
+- MCP over HTTPS: your AI client signs in through the app with OAuth, no extra service (#781)
+- Watch follow-ups for RPE, from what people say about the v1.4.3 watch
+- Change your display name in the app
+- The gym reminder learns two more tricks (#614): walk out of the gym with a workout still running
+  and it asks "Still training? Tap to finish", and an optional nudge a set time after your last
+  logged set to finish or discard, like the watch's idle check (#790). Same rules as the arrival
+  nudge: off by default, your gyms stay on the phone
+- **openGym on Google Play.** A new developer account needs a closed test with 12 testers for
+  14 days first, so that test has to start around 2026-11-05 for a launch at the end of November.
+  Until then the signed APK on GitHub is the Android app.
 
-- Optional username + password login next to passkeys (#118; Discord "Basic login", the
-  password-manager thread), shipped early in v1.3.9, behind `PASSWORD_LOGIN`
-- OIDC login for PocketID / Authelia-style setups (#130, #72; GitLab !132 is the candidate)
+## After v1.4.5  (in rough order, dates are guesses)
 
-## v1.4.7: Trainer & MCP write  (2027-02-21)
+None of these has a version number yet. They get one when the work starts, and the order can change
+when the tracker or Discord says so.
 
-- Personal-trainer role: invite students by code, open a student read-only, write their plan (#119,
-  GitLab !79; Discord "Trainer & Student Management")
-- MCP write tools (routines, log corrections, equipment) in pieces (#116); remote MCP over OAuth
-  for hosted AI clients (GitLab !88)
-- Switching kg ↔ lb converts stored values instead of relabelling them (#22)
-
-## v1.4.8: iOS app  (2027-03-07)
-
-- App Store / TestFlight build of the existing Capacitor target, HealthKit weight and workout
-  export, the Home Screen icon and timer-sound issues gone for good (#90; Discord "Google Health")
-- Apple Watch rest timer later, once the app is in the store
-
-## v1.4.9: Android & health  (2027-03-21)
-
-- Health Connect for weight and sessions (Discord "Use health connect", pulled forward into v1.3.11); Withings and other scales
-  (#127)
-- The rest timer as an ongoing notification on the lock screen (#122, PR #296) (shipped in v1.3.9); a
-  home-screen widget (#125, #299) and logging a set from the lock screen (Discord); the timer
-  rework (#165)
-- APK ABI filters (#136) (shipped in v1.3.9), about 12 MB smaller; the auto-backup directory picker (#161,
-  second half)
-- Media for the routine's exercises cached on the phone, so a session works with no signal (#123;
-  Discord "Download all videos")
-- Firefox-on-Windows QR and third-party passkey providers stay documented, not fixed: platform
-  behaviour (#103, #101)
-
-## v1.4.10: Looks, social, plugins  (2027-04-04)
-
-- Skins alongside the accent colour, backgrounds as part of a skin, a big-screen layout (#129,
-  #134, #135)
-- Social: friends, progress and plan sharing (PR #180); a plugin surface for integrations (Discord)
-- Native NixOS module (GitLab !83) and Azure deployment (!35) only if someone maintains them;
-  Arabic and right-to-left (GitLab !36) (shipped in v1.3.9)
+- **Circuits, AMRAP and EMOM** as one design instead of three features (#765, #725, Discussion #797)
+- **Personal-trainer role**: invite students, look at their training, write their plan (#119)
+- **Sign in with OIDC** (PocketID, Authelia and friends). PR #391 is the starting point, but it
+  needs splitting into pieces that can be reviewed (#130)
+- **F-Droid** (#325). The exercise animations are licensed, not free, so the first step is asking
+  F-Droid whether the 180 px media can ship with a NonFreeAssets label at all
+- **A free Coach on the phone itself**, with Apple Foundation Models on iOS and Gemini Nano on
+  Android, so no API key is needed
+- **Deeper Health Connect sync**: more history on the first read, real sets and calories written
+  back, scales via the hubs (#127)
+- **Strava and Garmin**: workouts out to Strava, Garmin through FIT files rather than a watch app
+- **Still on the list from older plans**: body composition in measurements (#648), session phases
+  (#57), rep ranges and AMRAP targets (#154), a warm-up generator (#156), cardio intervals,
+  searching your own history and your own photos on built-in exercises (#534), account recovery
+  (#584), the Android home-screen widget (#125), a Wear OS app, skins (#129) and social sharing
+- **openNutrition**, the sister app for food, once openGym's stores are settled
 
 ## Later: database storage
 
@@ -237,11 +237,13 @@ subscriptions and Coach data; an idempotent migration on first start; the old fi
 admin removes them. The state file stays the import/export and backup format, and the revision/merge
 contract from v1.3.6 stays the client contract. Which database is decided in the issue: embedded by
 default so `docker compose up` stays one line, a server database as an option (Discord
-"Postgres/SQLite"). It gets a version number once the work starts, and nothing else rides on that release.
+"Postgres/SQLite"). It gets a version number once the work starts, and nothing else rides on that
+release.
 
 ## How things move
 
-An issue sits in exactly one milestone; a milestone is a Sunday, and whatever is not merged and
-tested on gym-test by the Friday before rolls into the next one, and the date stays. Contributor pull requests from returning contributors get their pipeline started here
-automatically; a first PR is started by hand after a look at the diff. Anything in review is on gym-test.duarte-santos.ch. Releases
-bundle whatever has passed that test, with a changelog section per contributor.
+An issue sits in at most one milestone. Whatever is not merged and tested on gym-test by release
+day rolls into the next one; the release does not wait for it. Pull requests from returning
+contributors get their pipeline started automatically; a first PR is started by hand after a look
+at the diff. Anything in review is on gym-test.duarte-santos.ch. Releases bundle whatever has
+passed that test, with a thank-you per contributor in the changelog.

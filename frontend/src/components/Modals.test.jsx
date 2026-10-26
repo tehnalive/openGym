@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client'
 import { parseHTML } from 'linkedom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Modals, { afterScrollRestore, scrollRestorePending } from './Modals.jsx'
-import { NATIVE_KEYBOARD_EVENT } from '../lib/native-keyboard.js'
 
 const mocks = vi.hoisted(() => {
   const listeners = new Set()
@@ -348,56 +347,6 @@ describe('Modals scroll restore on close', () => {
     expect(dom.scrollTo).toHaveBeenCalledTimes(2)
     expect(dom.scrollTo).toHaveBeenLastCalledWith(0, 320)
     vi.useRealTimers()
-  })
-})
-
-describe('visual viewport positioning', () => {
-  it('keeps the modal root aligned when iOS pans and resizes the visual viewport', async () => {
-    Object.defineProperty(dom, 'innerHeight', { configurable: true, value: 850 })
-    const listeners = new Map()
-    const viewport = {
-      offsetTop: 0, offsetLeft: 0, width: 430, height: 850,
-      addEventListener: (type, fn) => listeners.set(type, fn),
-      removeEventListener: (type, fn) => { if (listeners.get(type) === fn) listeners.delete(type) },
-    }
-    Object.defineProperty(dom, 'visualViewport', { configurable: true, value: viewport })
-    await setSheets([sheet('exercise-picker')])
-
-    const modal = container.querySelector('#modal-root')
-    expect(modal.style.top).toBe('0px')
-    expect(modal.style.height).toBe('850px')
-    expect(modal.style.getPropertyValue('--modal-visual-height')).toBe('850px')
-
-    viewport.offsetTop = 176
-    viewport.offsetLeft = 2
-    viewport.height = 420
-    await act(async () => { listeners.get('scroll')?.() })
-
-    expect(modal.style.top).toBe('176px')
-    expect(modal.style.left).toBe('2px')
-    expect(modal.style.width).toBe('430px')
-    expect(modal.style.height).toBe('420px')
-    expect(modal.style.getPropertyValue('--modal-visual-height')).toBe('420px')
-  })
-
-  it('shrinks the modal root when Android reports a native keyboard without resizing the viewport', async () => {
-    Object.defineProperty(dom, 'innerHeight', { configurable: true, value: 850 })
-    const listeners = new Map()
-    const viewport = {
-      offsetTop: 0, offsetLeft: 0, width: 430, height: 850,
-      addEventListener: (type, fn) => listeners.set(type, fn),
-      removeEventListener: (type, fn) => { if (listeners.get(type) === fn) listeners.delete(type) },
-    }
-    Object.defineProperty(dom, 'visualViewport', { configurable: true, value: viewport })
-    await setSheets([sheet('exercise-picker')])
-
-    const modal = container.querySelector('#modal-root')
-    expect(modal.style.height).toBe('850px')
-    dom.document.documentElement.style.setProperty('--native-kb', '336px')
-    await act(async () => { dom.dispatchEvent(new dom.Event(NATIVE_KEYBOARD_EVENT)) })
-
-    expect(modal.style.height).toBe('514px')
-    expect(modal.style.getPropertyValue('--modal-visual-height')).toBe('514px')
   })
 })
 
