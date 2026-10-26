@@ -1,6 +1,16 @@
 # Project context
 
-The user is building a personal gym diary for two Android users. Research is in `research/`; selected implementation is an openGym adaptation for Telegram Mini App on a normal Docker server. The domain is managed at Cloudflare; do not migrate the API to Workers/D1 without a new user request.
+The user is building «Жимолость», a gym diary for trainers and trainees. The initial pilot was for two Android users; on 22.10.2026 the user chose the trainer/trainee service as the product direction. Research is in `research/`; selected implementation is an openGym adaptation for Telegram Mini App on a normal Docker server. The domain is managed at Cloudflare; do not migrate the API to Workers/D1 without a new user request.
+
+## Project orchestration
+
+Start with `docs/telegram/README.md` and `docs/telegram/HANDOFF.md` for portable project documentation. Features, configuration and operational instructions live alongside them. Local planning/status files can be absent from a repository-only handoff; the handoff document includes a dated roadmap snapshot. Keep these docs aligned with changed behavior and distinguish historical evidence from new verification.
+
+- Read `ORCHESTRATION.md` for team roles and the user's decisions. `KANBAN.md` is the task ledger; `TELEGRAM_PLAN.md` is the feature and acceptance plan. Keep one writer per shared file and assign bounded tasks with evidence of completion.
+- The user authorized the orchestrator to assign work to existing project chats and create necessary subagents. Usually run one or two workers, at most three on independent tasks. Workers do not delegate further unless the orchestrator explicitly assigns that responsibility.
+- Allowed worker models: `gpt-6.1-sol`, `gpt-6-luna`, `gpt-5.6-terra`, `gpt-5.6-luna`. Use only `low`, `medium`, or `high` reasoning; never exceed `high`. Do not silently substitute a different model if a selected model is unavailable.
+- The user authorized future deployments of agreed work without asking again, after appropriate tests and independent review. Verify a backup and rollback path before deploying; record actual post-deployment evidence. The current organizational task does not request a new deployment.
+- Independent review must come from a different author. Local, simulated, public HTTP and real Telegram/Android checks remain separate acceptance evidence.
 
 ## Source and ownership
 
