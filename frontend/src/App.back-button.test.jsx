@@ -34,7 +34,7 @@ const appear = async find => {
 
 beforeEach(async () => {
   originalS = useStore.getState().S
-  useStore.setState({ S: JSON.parse(JSON.stringify(DEF)) })
+  useStore.setState({ S: JSON.parse(JSON.stringify({ ...DEF, firstRunVersion: 1 })) })
   localStorage.setItem('gym_guest', '1')
   window.location.hash = '#/stats'
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)

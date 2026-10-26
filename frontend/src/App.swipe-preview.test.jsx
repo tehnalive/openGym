@@ -31,7 +31,7 @@ const scrolledTo = async y => {
 
 beforeEach(async () => {
   originalS = useStore.getState().S
-  useStore.setState({ S: JSON.parse(JSON.stringify(DEF)) })
+  useStore.setState({ S: JSON.parse(JSON.stringify({ ...DEF, firstRunVersion: 1 })) })
   localStorage.setItem('gym_guest', '1')   // a guest: the app itself, no sign-in screen
   window.location.hash = '#/settings'
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)

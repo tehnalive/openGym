@@ -19,6 +19,10 @@ const LABELS = {
   'auth.register.ok': 'Created a profile',
   'auth.register.fail': 'Profile creation failed',
   'auth.register.denied': 'Signup refused',
+  'auth.telegram.ok': 'Signed in with Telegram',
+  'auth.telegram.fail': 'Telegram sign-in failed',
+  'auth.telegram.register': 'Created a profile with Telegram',
+  'auth.telegram.denied': 'Telegram sign-in refused',
   'auth.logout': 'Signed out',
   'auth.logout.all': 'Signed out everywhere',
   // Settings → "Delete my account": the profile removed itself and everything of theirs.
@@ -89,6 +93,7 @@ const REASONS = {
   'user-missing': 'the passkey points at a profile that no longer exists',
   'account-disabled': 'the account is disabled',
   'credential-exists': 'that passkey already belongs to a profile',
+  'not-allowed': 'this Telegram account is not on the allowlist',
   'invite-invalid': 'the invite code was used or revoked in the meantime',
   'invite-rejected': 'wrong or already-used invite code',
   'code-invalid': 'wrong or expired pairing code',

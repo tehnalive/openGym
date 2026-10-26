@@ -22,15 +22,20 @@ describe('web Content-Security-Policy', () => {
     expect(scripts).not.toContain("'unsafe-inline'")
     expect(scripts).not.toContain("'unsafe-eval'")
   })
-  it('keeps what the app needs: blob: media, its own frames refused, no plugins', () => {
+  it('keeps what the app needs: blob: media, frames only from itself and Telegram Web, the Telegram SDK, no plugins', () => {
     expect(directive('img-src')).toContain('blob:')
     expect(directive('media-src')).toContain('blob:')
-    expect(directive('frame-ancestors')).toEqual(["'none'"])
+    // Telegram Web embeds the Mini App in an iframe; nothing else may.
+    expect(directive('frame-ancestors')).toEqual(["'self'", 'https://web.telegram.org'])
+    // lib/telegram.js loads the Web App SDK from telegram.org.
+    expect(directive('script-src')).toContain('https://telegram.org')
     expect(directive('object-src')).toEqual(["'none'"])
   })
   it('is sent from every block of the template that sets headers of its own', () => {
     const conf = read('web/nginx.conf.template')
-    const sets = conf.split('\n').filter(l => /^\s*add_header X-Frame-Options/.test(l)).length
+    // X-Frame-Options would forbid the Telegram Web iframe, so no block sets it; frame-ancestors in the policy decides.
+    expect(conf).not.toMatch(/^\s*add_header X-Frame-Options/m)
+    const sets = conf.split('\n').filter(l => /^\s*add_header X-Content-Type-Options/.test(l)).length
     const csp = conf.split('\n').filter(l => /^\s*add_header Content-Security-Policy "\$\{CONTENT_SECURITY_POLICY\}" always;/.test(l)).length
     expect(csp).toBe(sets)
   })
