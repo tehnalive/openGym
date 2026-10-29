@@ -121,7 +121,7 @@ test('an empty short name gives the main Mini App link, and a bad one falls back
   assert.equal(a.body.link, `https://t.me/Test_bot?startapp=p_${a.body.id}`);
   const bad = await two(t, { TELEGRAM_BOT_USERNAME: 'x/../y', TELEGRAM_MINI_APP_SHORT_NAME: 'a b' });
   const b = await bad.app.call('/api/shares', { method: 'POST', cookie: bad.alice, body: { bundle: BUNDLE() } });
-  assert.equal(b.body.link, `https://t.me/Gym_statsbot/app?startapp=p_${b.body.id}`);
+  assert.equal(b.body.link, `https://t.me/Gym_statsbot/zhim?startapp=p_${b.body.id}`);
 });
 
 test('sharing needs a session', async t => {

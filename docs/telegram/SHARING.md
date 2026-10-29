@@ -3,7 +3,7 @@
 Кнопка **План → Поделиться в Telegram** создаёт на сервере копию программы (только тренировки, расписание и свои упражнения; ни истории, ни веса, ни настроек) и открывает выбор чата Telegram со ссылкой вида
 
 ```text
-https://t.me/Gym_statsbot/app?startapp=p_<id>
+https://t.me/Gym_statsbot/zhim?startapp=p_<id>
 ```
 
 Друг нажимает ссылку, Mini App открывается и показывает «Тренировка от <имя>: N упражнений, дни…» с кнопками «Добавить в мои программы» и «Закрыть».
@@ -15,7 +15,7 @@ https://t.me/Gym_statsbot/app?startapp=p_<id>
 1. В @BotFather: `/newapp`, выбрать бота `@Gym_statsbot`.
 2. Название и описание любые; картинка 640×360 и GIF обязательны для мастера (можно пропустить GIF командой `/empty`).
 3. URL Mini App: тот же адрес, что в `TELEGRAM_MINI_APP_URL` (`https://gym.cringe.monster/`).
-4. Короткое имя (short name): `app`. Тогда ссылка `https://t.me/Gym_statsbot/app` работает.
+4. Короткое имя (short name): `zhim`. Так оно и зарегистрировано (30.10.2026), ссылка `https://t.me/Gym_statsbot/zhim` работает.
 
 Если короткое имя другое, задайте его в `TELEGRAM_MINI_APP_SHORT_NAME`. Если нужно обойтись без `/newapp`, оставьте переменную пустой (`TELEGRAM_MINI_APP_SHORT_NAME=`): ссылка станет `https://t.me/Gym_statsbot?startapp=p_<id>` и откроет главное Mini App бота (его задаёт BotFather: `/mybots` → бот → Bot Settings → Configure Mini App). Такая ссылка в чате показывает кнопку «Открыть», а не открывается сразу.
 
@@ -24,7 +24,7 @@ https://t.me/Gym_statsbot/app?startapp=p_<id>
 | Переменная | По умолчанию | Смысл |
 |---|---|---|
 | `TELEGRAM_BOT_USERNAME` | `Gym_statsbot` | Имя бота без `@` (5–32 символа `A-Za-z0-9_`). Неверное значение заменяется на умолчание. |
-| `TELEGRAM_MINI_APP_SHORT_NAME` | `app` | Короткое имя Mini App; пусто — ссылка на главное Mini App бота. |
+| `TELEGRAM_MINI_APP_SHORT_NAME` | `zhim` | Короткое имя Mini App; пусто — ссылка на главное Mini App бота. |
 | `SHARE_TTL_DAYS` | `0` | Срок жизни ссылки в днях; `0` — ссылка не истекает. |
 | `SHARE_MAX_PER_USER` | `100` | Сколько ссылок у одного профиля. |
 

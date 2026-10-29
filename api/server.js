@@ -2144,8 +2144,8 @@ const SHARE_TTL_DAYS = intEnv('SHARE_TTL_DAYS', 0, 0, 3650);
 const SHARE_MAX_PER_USER = intEnv('SHARE_MAX_PER_USER', 100, 1, 1000);
 const SHARE_BOT = /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(process.env.TELEGRAM_BOT_USERNAME || '') ? process.env.TELEGRAM_BOT_USERNAME : 'Gym_statsbot';
 // Empty on purpose means the bot's main Mini App (t.me/<bot>?startapp=...).
-const SHARE_APP = process.env.TELEGRAM_MINI_APP_SHORT_NAME === undefined ? 'app'
-  : /^([A-Za-z][A-Za-z0-9_]{2,31})?$/.test(process.env.TELEGRAM_MINI_APP_SHORT_NAME) ? process.env.TELEGRAM_MINI_APP_SHORT_NAME : 'app';
+const SHARE_APP = process.env.TELEGRAM_MINI_APP_SHORT_NAME === undefined ? 'zhim'
+  : /^([A-Za-z][A-Za-z0-9_]{2,31})?$/.test(process.env.TELEGRAM_MINI_APP_SHORT_NAME) ? process.env.TELEGRAM_MINI_APP_SHORT_NAME : 'zhim';
 const SHARE_CREATES = createWindow({ max: 10, windowMs: 3600000 });
 const SHARE_READS = createWindow({ max: 120, windowMs: 60000 });
 setInterval(() => { SHARE_CREATES.sweep(); SHARE_READS.sweep(); }, 600000).unref();
