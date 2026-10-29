@@ -12,6 +12,39 @@ export function sheetKeyboardInsets(win) {
   return { bottomInset, visualHeight }
 }
 
+/* Call `sync` whenever what the keyboard leaves of the screen may have changed, and again once it
+   has settled. Telegram's iOS WebView shrinks the window itself when the keyboard opens, a beat
+   after the visual viewport already shrank: for that beat the two disagree by the keyboard's
+   height, a sheet measured then is lifted by it, and nothing used to measure again because the
+   visual viewport had nothing more to report. So the window's own resize and Telegram's
+   viewportChanged count too, and two late re-measures catch a window that settles quietly.
+   Returns the function that stops listening. */
+export function watchKeyboardViewport(sync, win = typeof window !== 'undefined' ? window : null) {
+  const viewport = win?.visualViewport
+  if (!win || !viewport) return () => {}
+  let timers = []
+  const clear = () => { timers.forEach(id => win.clearTimeout(id)); timers = [] }
+  const run = () => {
+    sync()
+    clear()
+    timers = [120, 450].map(ms => win.setTimeout(sync, ms))
+  }
+  const tg = win.Telegram?.WebApp
+  viewport.addEventListener('resize', run)
+  viewport.addEventListener('scroll', run)
+  win.addEventListener('resize', run)
+  win.addEventListener(NATIVE_KEYBOARD_EVENT, run)
+  tg?.onEvent?.('viewportChanged', run)
+  return () => {
+    clear()
+    viewport.removeEventListener('resize', run)
+    viewport.removeEventListener('scroll', run)
+    win.removeEventListener('resize', run)
+    win.removeEventListener(NATIVE_KEYBOARD_EVENT, run)
+    tg?.offEvent?.('viewportChanged', run)
+  }
+}
+
 /* Keyboard-aware sheets. When the mobile keyboard comes up the layout viewport keeps its
    size, only the visual viewport shrinks — so a bottom sheet with a text input near its
    foot ends up half under the keys. index.css reads two custom properties on the sheet
@@ -53,13 +86,9 @@ export function useSheetKeyboard(inputRef, enabled = true, { reveal = false } = 
     const viewport = typeof window !== 'undefined' ? window.visualViewport : null
     if (!viewport) return
     sync()
-    viewport.addEventListener('resize', sync)
-    viewport.addEventListener('scroll', sync)
-    window.addEventListener(NATIVE_KEYBOARD_EVENT, sync)
+    const stop = watchKeyboardViewport(sync)
     return () => {
-      viewport.removeEventListener('resize', sync)
-      viewport.removeEventListener('scroll', sync)
-      window.removeEventListener(NATIVE_KEYBOARD_EVENT, sync)
+      stop()
       // The sheet element outlives this input when the sheet swaps content, so leave it
       // the way we found it rather than pinning a stale keyboard inset on it.
       const sheet = inputRef.current?.closest?.('.sheet')

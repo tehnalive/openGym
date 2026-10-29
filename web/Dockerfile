@@ -111,7 +111,7 @@ ENV MEDIA_UPLOAD_MAX=48m
 # injects a script of its own (analytics), set this to a policy that allows it, or to
 # "frame-ancestors 'none'" for the old header. Telegram needs https://telegram.org in script-src (the
 # Web App SDK is loaded from there) and web.telegram.org in frame-ancestors (Telegram Web embeds the app).
-ENV CONTENT_SECURITY_POLICY="default-src 'self'; script-src 'self' https://telegram.org 'sha256-xUZtZS1nWJaAyUqA7ZKgkLhjdEisnY0MiRmax16aGFg='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' https: http:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://web.telegram.org"
+ENV CONTENT_SECURITY_POLICY="default-src 'self'; script-src 'self' https://telegram.org 'sha256-lDKdRPy0ehsxMY81PGGlKcvR1+gnUmDQozNj2Pc1CSo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' https: http:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://web.telegram.org"
 
 # Probe the port nginx was actually told to listen on (NGINX_PORT is configurable, so a
 # hardcoded http://localhost/ breaks on any instance that changed it), and address it as

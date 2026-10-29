@@ -15,8 +15,7 @@
 
 import { useRef, useState, useEffect, useCallback, forwardRef } from 'react'
 import Icon from './Icon.jsx'
-import { sheetKeyboardInsets } from '../lib/use-sheet-keyboard.js'
-import { NATIVE_KEYBOARD_EVENT } from '../lib/native-keyboard.js'
+import { sheetKeyboardInsets, watchKeyboardViewport } from '../lib/use-sheet-keyboard.js'
 import { t } from '../lib/i18n.js'
 
 /* ============================ text ============================ */
@@ -373,13 +372,9 @@ function SelectSheet({ title, value, options, onChange, search, close }) {
     if (!viewport) return
     const sync = () => syncPickerViewport()
     sync()
-    viewport.addEventListener('resize', sync)
-    viewport.addEventListener('scroll', sync)
-    window.addEventListener(NATIVE_KEYBOARD_EVENT, sync)
+    const stop = watchKeyboardViewport(sync)
     return () => {
-      viewport.removeEventListener('resize', sync)
-      viewport.removeEventListener('scroll', sync)
-      window.removeEventListener(NATIVE_KEYBOARD_EVENT, sync)
+      stop()
       const sheet = inputRef.current?.closest('.sheet')
       sheet?.style.removeProperty('--picker-keyboard-bottom')
       sheet?.style.removeProperty('--picker-visual-height')
