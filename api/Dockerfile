@@ -51,9 +51,16 @@ COPY package.json package-lock.json* ./
 # build host happened to be.
 RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 
+# The report card renderer (@resvg/resvg-js) ships its native code as a per-platform *optional*
+# package, which --omit=optional above skips on purpose (it keeps the Agent SDK out). Install just
+# that one, for this image's architecture and musl, at the version the lockfile pins. Without it
+# server.js still boots: the workout report is sent as plain text instead of a PNG card.
+RUN RESVG="$(node -p "require('./package.json').dependencies['@resvg/resvg-js']")"  && case "$(uname -m)" in x86_64) A=x64 ;; aarch64) A=arm64 ;; *) A= ;; esac  && if [ -n "$A" ]; then npm install --no-save --no-package-lock --omit=dev --omit=optional --ignore-scripts "@resvg/resvg-js-linux-$A-musl@$RESVG"; fi  && npm cache clean --force
+
 # Every module server.js imports from the api root has to be named here: the image carries nothing
 # else, and one that is missing only shows at boot, as ERR_MODULE_NOT_FOUND.
-COPY server.js telegram-auth.mjs telegram-notifications.mjs push-messages.js nudge.js nudge-copy.js verify-error.js password.js rate-limit.js passkeys-store.js device-link.js media.js queue.js sync-stamps.js durable.js admin-socket.js recover.js shares.js ./
+COPY server.js telegram-auth.mjs telegram-notifications.mjs telegram-card.mjs push-messages.js nudge.js nudge-copy.js verify-error.js password.js rate-limit.js passkeys-store.js device-link.js media.js queue.js sync-stamps.js durable.js admin-socket.js recover.js shares.js ./
+COPY card-assets ./card-assets
 COPY coach ./coach
 ENV NODE_ENV=production
 ENV PORT=3000

@@ -15,9 +15,9 @@ const ORIGIN = 'https://gym.example.test';
 const ALICE = 4_500_000_001;
 const BOB = 4_500_000_002;
 
-function initData(id = ALICE, { name = 'Аня', authDate = Math.floor(Date.now() / 1000), token = TOKEN, photoUrl, username = 'same-name-does-not-link' } = {}) {
+function initData(id = ALICE, { name = 'Аня', authDate = Math.floor(Date.now() / 1000), token = TOKEN, photoUrl, username = 'same-name-does-not-link', lang } = {}) {
   const fields = new Map([
-    ['user', JSON.stringify({ id, first_name: name, username, ...(photoUrl === undefined ? {} : { photo_url: photoUrl }) })],
+    ['user', JSON.stringify({ id, first_name: name, username, ...(lang === undefined ? {} : { language_code: lang }), ...(photoUrl === undefined ? {} : { photo_url: photoUrl }) })],
     ['query_id', 'test-query'], ['auth_date', String(authDate)],
   ]);
   const check = [...fields].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
@@ -271,4 +271,14 @@ test('Telegram invalid-login attempts share early existing auth throttle', async
   assert.ok(paused);
   assert.equal((await app.login(ALICE)).status, 429);
   assert.equal(app.db().users.length, 0);
+});
+
+test('signed language_code is stored as a bare subtag, kept when later omitted, never taken from the body', async t => {
+  const app = await start(t);
+  await app.login(ALICE, { lang: 'en-GB' });
+  assert.equal(app.db().users[0].telegramLang, 'en');
+  await app.login(ALICE, { lang: 'ru' });
+  assert.equal(app.db().users[0].telegramLang, 'ru');
+  await app.login(ALICE, {}, { language_code: 'de', lang: 'de' });
+  assert.equal(app.db().users[0].telegramLang, 'ru', 'missing signed language_code keeps the last one; body fields are ignored');
 });
