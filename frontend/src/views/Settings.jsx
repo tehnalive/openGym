@@ -36,6 +36,7 @@ import { checkForUpdate, downloadAndInstall, fetchChecksum, forgetDownloadedUpda
 import { APK_VARIANT, VARIANT_NAMES } from '../lib/apk-variant.js'
 import { BUILTIN_PX } from '../lib/anim-quality.js'
 import { selfUpdates } from '../lib/channel.js'
+import { toggleKbDebug, startKbDebug } from '../lib/kb-debug.js'
 import { forgetCoach } from '../lib/coach-api.js'
 import { coachAvailable } from '../lib/coach.js'
 import { REST_MAX, REST_PAUSE_MIN, REST_PAUSE_MAX, fmtRest, fmtDuration } from '../lib/duration.js'
@@ -116,6 +117,7 @@ export default function Settings({ page = null, find = null, via = null, entryKe
   const { update, importConflict, importBackup, setUnit, resetEverything: resetAll, setUser, pullState, pushState, resetDemo } = useStore()
   const toast = useUI(s => s.toast)
   const fileRef = useRef(null)
+  const versionTaps = useRef({ n: 0, at: 0 })   // seven quick taps on the version: keyboard diagnostics (lib/kb-debug.js)
   const importRef = useRef(null)
   const body = useRef(null)
   const wakeOK = wakeLockSupported()
@@ -940,6 +942,15 @@ export default function Settings({ page = null, find = null, via = null, entryKe
       {/* The server updates this Mini App. Never send its users to an upstream APK or PWA installer. */}
       <Section>
         <Row icon="info" iconTint="var(--grey)" title={t('Version')} value={'v' + __APP_VERSION__}
+          onClick={() => {
+            const k = versionTaps.current, now = Date.now()
+            k.n = now - k.at < 1500 ? k.n + 1 : 1; k.at = now
+            if (k.n < 7) return
+            k.n = 0
+            const on = toggleKbDebug()
+            startKbDebug()
+            toast(on ? 'Диагностика клавиатуры включена' : 'Диагностика клавиатуры выключена')
+          }}
           subtitle={MOBILE && selfUpdate ? t('{0} APK, animations at {1} px', VARIANT_NAMES[APK_VARIANT], BUILTIN_PX) : undefined} />
         {MOBILE && selfUpdate && <Row icon="download" iconTint="var(--green)"
               title={updateInfo?.hasUpdate ? t('Update to openGym v{0}', updateInfo.latestVersion) : t('Check for updates')}

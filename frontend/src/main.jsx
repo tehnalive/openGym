@@ -6,6 +6,7 @@ import { useStore } from './store/useStore.js'
 import { startMediaSync } from './lib/media-sync.js'
 import { startTelegramAwareMediaSync } from './lib/telegram.js'
 import { startNativeKeyboard } from './lib/native-keyboard.js'
+import { startKbDebug } from './lib/kb-debug.js'
 // The Coach's and the admin dashboard's styles stay in the main stylesheet, in the place they
 // always had (before index.css), although their screens are now loaded on demand (App.jsx).
 import './admin.css'
@@ -31,6 +32,8 @@ startTelegramAwareMediaSync(useStore, startMediaSync)
 // Android 15 does not resize the page for the soft keyboard; the app says how much it covers and
 // this keeps the focused field above it. Idle everywhere else.
 startNativeKeyboard()
+// Off unless switched on in Settings → About (seven taps on the version): see lib/kb-debug.js.
+startKbDebug()
 
 // Not in the mobile build: the native shell already serves everything from disk.
 if (!MOBILE && 'serviceWorker' in navigator && location.protocol === 'https:') {

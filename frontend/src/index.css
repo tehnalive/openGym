@@ -2346,3 +2346,15 @@ button.wl-summary{width:100%;padding:0 0 10px;text-align:start;border-radius:var
 .gym-radius-row>:first-child{flex:1}
 .gym-radius-val{min-width:64px;text-align:end;font-variant-numeric:tabular-nums;color:var(--label-2)}
 .gym-actions{display:flex;flex-direction:column;gap:10px;margin:4px 0 30px}
+
+/* UI01 experiment (lib/kb-debug.js): layout modes for the keyboard in Telegram on iPhone. They apply
+   only while the diagnostics are on and a mode other than "auto" is picked there. */
+html[data-kbmode="tg"] #modal-root{inset:auto;top:0;left:0;right:0;height:var(--tg-viewport-height,100dvh)}
+html[data-kbmode="tg"] .sheet:has(.picker-search),html[data-kbmode="tg"] .sheet:has(.kb-lift){
+  bottom:0;max-height:calc(var(--tg-viewport-height,100dvh) - var(--sat) - 8px)}
+html[data-kbmode="vv"] #modal-root{inset:auto;left:0;right:0;top:var(--kb-vv-top,0px);height:var(--kb-vv-h,100dvh)}
+html[data-kbmode="vv"] .sheet:has(.picker-search),html[data-kbmode="vv"] .sheet:has(.kb-lift){
+  bottom:0;max-height:calc(var(--kb-vv-h,100dvh) - var(--sat) - 8px)}
+html[data-kbmode="top"] .sheet:has(.picker-search),html[data-kbmode="top"] .sheet:has(.kb-lift){
+  bottom:auto;top:calc(var(--kb-vv-top,0px) + var(--sat) + 8px);
+  max-height:calc(var(--kb-vv-h,100dvh) - var(--sat) - 16px)}
