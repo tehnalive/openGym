@@ -13,13 +13,18 @@
 // A model on your own machine or network (Ollama on the LAN, a box on your tailnet) is not a
 // third party, so it is not asked about: see isLocalHost.
 import { MOBILE, readJsonFile, writeJsonFile } from './mobile.js'
+import { getLang } from './i18n.js'
 
 const KEY = 'gym_coach_ai_consent'
 const FILE = 'opengym-coach-consent.json'
 
 // The name a person knows the company by. A compatible endpoint is whatever it was pointed at,
 // so it is named by its host; the runtime providers on a server talk to the same companies.
-export const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google Gemini', claude: 'Anthropic', codex: 'OpenAI' }
+export const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google Gemini', claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode' }
+
+// The server's own words about where the data goes ({ ru, en } from /api/coach/disclosure), in the
+// language the app is showing. Null when the provider has none.
+export const noticeText = n => (n && typeof n === 'object' ? (/^ru(?![a-z])/i.test(getLang() || '') ? n.ru : n.en) || null : null)
 // Server providers that send nothing anywhere: the test fixture answers from a file.
 const NOWHERE = new Set(['fixture', 'demo'])
 
@@ -56,7 +61,7 @@ export function consentTarget(info, via) {
   const provider = String(info.provider)
   const host = info.host ? String(info.host).toLowerCase() : null
   const name = (provider !== 'compatible' && PROVIDER_NAMES[provider]) || host || info.providerLabel || provider
-  return { key: `${via}|${provider}|${host || ''}`, via, provider, host, name, local: isLocalHost(host) }
+  return { key: `${via}|${provider}|${host || ''}`, via, provider, host, name, local: isLocalHost(host), notice: via === 'server' ? noticeText(info.notice) : null }
 }
 
 /* ---------- the remembered answers ---------- */

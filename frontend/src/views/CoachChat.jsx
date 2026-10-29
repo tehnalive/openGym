@@ -97,7 +97,9 @@ export default function CoachChat() {
       if (!pending && !settled) {
         const cls = lastError?.errorClass || (last?.outcome === 'failed' ? (last.errorClass || 'internal') : null)
         appendChat(s, cls
-          ? { role: 'coach', kind: 'error', text: jobErrorText(cls, lastError?.detail) }
+          // `last.message`: the server's own Russian/English line for a failure the app has no
+          // string for (a free model out of requests), fixed text that never carries the provider's words.
+          ? { role: 'coach', kind: 'error', text: (!lastError && last?.message) || jobErrorText(cls, lastError?.detail) }
           : { role: 'coach', kind: 'nochange', text: last?.reading
             ? last.reading
             : t('I looked through everything and there is nothing I would change right now. Keep it up, and ask me again after a few more sessions.') })

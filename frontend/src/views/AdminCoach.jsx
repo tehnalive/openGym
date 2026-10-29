@@ -141,7 +141,7 @@ export default function AdminCoach() {
     { title: 'Testing', hint: 'A built-in fake that answers instantly, so the whole loop can be tried without an account.', items: d.providers.filter(p => TESTING_IDS.includes(p.id)) }
   ]
 
-  const hasCredentialStep = !!(meta.setupToken || meta.apiKey)
+  const hasCredentialStep = !!(meta.setupToken || meta.apiKey || meta.envKey)
   // The model this provider was explicitly GIVEN — as opposed to `d.model`, which falls back to
   // the provider's own default. Both halves of the Model step (the dropdown and the free-text
   // box) read this one value, so they cannot disagree about what is configured.
@@ -235,7 +235,10 @@ export default function AdminCoach() {
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
           <CredentialPill auth={d.auth} />
         </div>
-        {authState === 'connected' ? <>
+        {meta.envKey ? <div className="adm-hint">{authState === 'connected'
+          ? <>The key is set in the server environment (<code>{meta.envKey}</code>). It is never stored in the database or shown here.</>
+          : <>No key yet. Set <code>{meta.envKey}</code> in the server environment and restart the api container; it cannot be entered here.</>}</div>
+        : authState === 'connected' ? <>
           <div className="adm-hint">Connected{d.auth.account ? ' as ' + d.auth.account : ''} via {credentialLabel(d.auth.type)}{d.auth.connectedAt ? ' · added ' + rel(d.auth.connectedAt) : ''}. The key is stored encrypted and is never shown again.</div>
           <div className="adm-actions">
             {meta.apiKey && <Button size="sm" variant="tinted" icon="lock" disabled={busy}
@@ -436,6 +439,10 @@ const failureTitle = cls => ({
   nostate: 'The user\'s training data could not be read',
   off: 'The Coach was off when the job ran',
   toolarge: 'The user\'s training data made a request too large to send, so no provider was called',
+  ratelimit: 'The provider answered 429: a rate limit is reached',
+  freeonly: 'The gateway refused a free model called from outside OpenCode (429 FreeUsageLimitError): pick a paid model in OPENCODE_MODEL',
+  quota: 'The provider answered 402: the account is out of credit',
+  modelgone: 'The model is not available to this key (check OPENCODE_MODEL)',
   internal: 'Something went wrong on the server'
 }[cls] || cls || 'Failed')
 
