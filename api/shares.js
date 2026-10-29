@@ -36,10 +36,10 @@ export function checkBundle(raw) {
   return out;
 }
 
-/** The name a recipient sees. A profile name that had to be made unique carries the Telegram id
+/** The name a recipient sees. A profile name that had to be made unique carries the Telegram id or random hex
  *  after a middle dot (see POST /api/telegram/login); that suffix is never shown. */
 export function authorName(user) {
-  const n = String(user?.name || '').replace(/\s·\s\d{5,}$/, '').trim().slice(0, 40);
+  const n = String(user?.name || '').replace(/\s·\s(\d{5,}|[0-9a-f]{8})$/, '').trim().slice(0, 40);
   return n || 'openGym';
 }
 
