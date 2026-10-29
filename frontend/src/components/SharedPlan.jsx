@@ -21,8 +21,6 @@ const shareText = name => name
   ? `Моя программа тренировок «${name}» в Жимолости. Откройте ссылку и добавьте её себе.`
   : 'Моя программа тренировок в Жимолости. Откройте ссылку и добавьте её себе.'
 
-const daysLeft = iso => Math.max(1, Math.ceil((Date.parse(iso) - Date.now()) / 86400000))
-
 export const sharePlanSheet = () => ui().openSheet(close => <SharePlan close={close} />)
 
 function SharePlan({ close }) {
@@ -51,18 +49,6 @@ function SharePlan({ close }) {
         : 'Не удалось создать ссылку. Проверьте соединение и повторите.')
     } finally { setBusy(false) }
   }
-  const revoke = async () => {
-    setBusy(true); setError('')
-    try {
-      await api('/api/shares/' + share.id, { method: 'DELETE' })
-      toast('Ссылка отозвана')
-      close()
-    } catch (e) {
-      if (e?.status === 404) { toast('Ссылка уже не действует'); close() }
-      else setError('Не удалось отозвать ссылку. Повторите.')
-    } finally { setBusy(false) }
-  }
-
   return <>
     <h3>Поделиться программой</h3>
     {!share && <>
@@ -71,21 +57,19 @@ function SharePlan({ close }) {
       </div>
       <div className="small" style={{ color: 'var(--yellow)', marginBottom: 14, lineHeight: 1.4 }}>
         Ссылку сможет открыть любой, у кого она окажется, в том числе если ему перешлют сообщение. Ваше имя в Telegram будет видно.
-        Ссылка действует 30 дней, её можно отозвать здесь же.
+        Ссылка работает всегда.
       </div>
       <Button variant="primary" disabled={busy} onClick={create}>{busy ? 'Создаём…' : 'Создать ссылку и отправить'}</Button>
     </>}
     {share && <>
       <div className="dim small" style={{ marginBottom: 10, lineHeight: 1.4 }}>
-        Ссылка готова и действует ещё {daysLeft(share.expires)} дн. Любой, у кого она есть, увидит программу.
+        Ссылка готова и будет работать всегда. Любой, у кого она есть, увидит программу.
       </div>
       <input readOnly value={share.link} aria-label="Ссылка на программу" onFocus={e => e.target.select()}
         style={{ width: '100%', marginBottom: 14, boxSizing: 'border-box' }} />
       <Button variant="primary" icon="share" onClick={() => send(share.link)}>Отправить ещё раз</Button>
       <div style={{ height: 8 }} />
       <Button onClick={async () => toast(await copyLink(share.link) ? 'Ссылка скопирована' : 'Не удалось скопировать')}>Скопировать ссылку</Button>
-      <div style={{ height: 8 }} />
-      <Button variant="ghost" className="dim" disabled={busy} onClick={revoke}>Отозвать ссылку</Button>
     </>}
     {error && <div role="alert" className="small" style={{ color: 'var(--red)', marginTop: 12, lineHeight: 1.4 }}>{error}</div>}
     <div style={{ height: 8 }} />

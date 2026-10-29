@@ -30,8 +30,8 @@ services:
       # Ссылки на программы (docs/telegram/SHARING.md). Короткое имя Mini App задаётся в BotFather (/newapp).
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-Gym_statsbot}
       TELEGRAM_MINI_APP_SHORT_NAME: ${TELEGRAM_MINI_APP_SHORT_NAME-app}
-      SHARE_TTL_DAYS: ${SHARE_TTL_DAYS:-30}
-      SHARE_MAX_PER_USER: ${SHARE_MAX_PER_USER:-20}
+      SHARE_TTL_DAYS: ${SHARE_TTL_DAYS:-0}
+      SHARE_MAX_PER_USER: ${SHARE_MAX_PER_USER:-100}
     volumes:
       - ./data:/data
 

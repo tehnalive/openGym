@@ -87,7 +87,10 @@ test('a shared plan is created, read by a friend, counted and revoked by its aut
   assert.equal(made.status, 200);
   assert.match(made.body.id, /^[A-Za-z0-9_-]{12}$/);
   assert.equal(made.body.link, `https://t.me/Test_bot/gym?startapp=p_${made.body.id}`);
-  assert.ok(Date.parse(made.body.expires) > Date.now() + 29 * 86400000);
+  assert.equal(made.body.expires, null, 'links do not expire by default');
+  const again = await app.call('/api/shares', { method: 'POST', cookie: alice, body: { bundle: BUNDLE() } });
+  assert.equal(again.body.id, made.body.id, 'the same plan is the same link');
+  assert.equal(app.db().shares.length, 1);
   assert.ok(('p_' + made.body.id).length <= 512);
 
   const seen = await app.call(`/api/shares/${made.body.id}`, { cookie: bob });
@@ -168,7 +171,8 @@ test('unknown bundle fields are not stored', async t => {
 
 test('a profile holds a limited number of links', async t => {
   const { app, alice, bob } = await two(t, { SHARE_MAX_PER_USER: '2' });
-  const make = cookie => app.call('/api/shares', { method: 'POST', cookie, body: { bundle: BUNDLE() } });
+  let n = 0;
+  const make = cookie => app.call('/api/shares', { method: 'POST', cookie, body: { bundle: BUNDLE({ name: 'Plan ' + ++n }) } });
   const first = await make(alice);
   assert.equal((await make(alice)).status, 200);
   const third = await make(alice);
@@ -181,7 +185,8 @@ test('a profile holds a limited number of links', async t => {
 
 test('creation is rate limited per profile', async t => {
   const { app, alice, bob } = await two(t, { SHARE_MAX_PER_USER: '200' });
-  const make = cookie => app.call('/api/shares', { method: 'POST', cookie, body: { bundle: BUNDLE() } });
+  let n = 0;
+  const make = cookie => app.call('/api/shares', { method: 'POST', cookie, body: { bundle: BUNDLE({ name: 'Plan ' + ++n }) } });
   for (let i = 0; i < 10; i++) assert.equal((await make(alice)).status, 200);
   assert.equal((await make(alice)).status, 429);
   assert.equal((await make(bob)).status, 200);

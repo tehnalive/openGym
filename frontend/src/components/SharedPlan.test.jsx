@@ -129,13 +129,13 @@ describe('sharePlanSheet', () => {
     useStore.setState({ S: { ...S, routines: [{ id: 'r1', name: 'Верх', ex: [{ id: exId, sets: 3, reps: 8 }] }] } })
   })
 
-  it('warns that the link is public, then creates it, opens the chat picker and can revoke', async () => {
+  it('warns that the link is public, then creates it and opens the chat picker', async () => {
     const openTelegramLink = vi.fn()
     window.Telegram = { WebApp: { openTelegramLink } }
     mocks.api.mockImplementation(async (path, opts) => {
       if (path === '/api/shares' && opts?.method === 'POST') {
         expect(JSON.parse(opts.body).bundle.routines[0].name).toBe('Верх')
-        return { id: 'abcdefgh12', link: 'https://t.me/Gym_statsbot/app?startapp=p_abcdefgh12', expires: new Date(Date.now() + 30 * 86400000).toISOString() }
+        return { id: 'abcdefgh12', link: 'https://t.me/Gym_statsbot/app?startapp=p_abcdefgh12', expires: null }
       }
       return { ok: true }
     })
@@ -146,10 +146,8 @@ describe('sharePlanSheet', () => {
     await flush()
     expect(openTelegramLink).toHaveBeenCalledTimes(1)
     expect(openTelegramLink.mock.calls[0][0]).toContain('https://t.me/share/url?url=' + encodeURIComponent('https://t.me/Gym_statsbot/app?startapp=p_abcdefgh12'))
-    expect(host.textContent).toContain('ещё 30 дн')
-    await act(async () => { button(host, 'Отозвать ссылку').click() })
-    await flush()
-    expect(mocks.api).toHaveBeenLastCalledWith('/api/shares/abcdefgh12', { method: 'DELETE' })
+    expect(host.textContent).toContain('будет работать всегда')
+    expect(button(host, 'Отозвать ссылку')).toBeUndefined()
     delete window.Telegram
   })
 

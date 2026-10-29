@@ -2100,8 +2100,9 @@ setInterval(() => {
 // Shared plans (TG19). The link is public to anyone who holds it, so it lives for SHARE_TTL_DAYS and
 // the author can pull it earlier; creating is budgeted per profile, reading per profile too.
 const intEnv = (name, def, min, max) => { const n = parseInt(process.env[name] || '', 10); return n >= min && n <= max ? n : def; };
-const SHARE_TTL_DAYS = intEnv('SHARE_TTL_DAYS', 30, 1, 365);
-const SHARE_MAX_PER_USER = intEnv('SHARE_MAX_PER_USER', 20, 1, 200);
+// 0 (the default) means a link never expires: what someone sent a friend keeps opening.
+const SHARE_TTL_DAYS = intEnv('SHARE_TTL_DAYS', 0, 0, 3650);
+const SHARE_MAX_PER_USER = intEnv('SHARE_MAX_PER_USER', 100, 1, 1000);
 const SHARE_BOT = /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(process.env.TELEGRAM_BOT_USERNAME || '') ? process.env.TELEGRAM_BOT_USERNAME : 'Gym_statsbot';
 // Empty on purpose means the bot's main Mini App (t.me/<bot>?startapp=...).
 const SHARE_APP = process.env.TELEGRAM_MINI_APP_SHORT_NAME === undefined ? 'app'
@@ -2330,6 +2331,10 @@ const routes = {
     const bundle = checkBundle(body.bundle);
     if (typeof bundle === 'string') return json(res, 400, { error: bundle, code: 'share-invalid' });
     dropExpiredShares();
+    // The same plan sent again is the same link, so repeated sharing does not pile records up.
+    const text = JSON.stringify(bundle);
+    const same = db.shares.find(x => x.userId === user.id && JSON.stringify(x.bundle) === text);
+    if (same) return json(res, 200, { id: same.id, link: shareLink(same.id, SHARE_BOT, SHARE_APP), created: same.created, expires: same.expires || null });
     if (db.shares.filter(x => x.userId === user.id).length >= SHARE_MAX_PER_USER) {
       return json(res, 409, { error: 'too many shared plans, revoke one first', code: 'share-limit', limit: SHARE_MAX_PER_USER });
     }
@@ -2337,7 +2342,7 @@ const routes = {
     do { id = newShareId(); } while (db.shares.some(x => x.id === id));
     const now = Date.now();
     const share = { id, userId: user.id, author: authorName(user), created: new Date(now).toISOString(),
-      expires: new Date(now + SHARE_TTL_DAYS * 86400000).toISOString(), opens: 0, bundle };
+      expires: SHARE_TTL_DAYS ? new Date(now + SHARE_TTL_DAYS * 86400000).toISOString() : null, opens: 0, bundle };
     db.shares.push(share);
     try { saveDb(); } catch (error) { db.shares.pop(); throw error; }
     audit(req, 'share.create', { user });
@@ -2353,7 +2358,7 @@ const routes = {
     if (!share || shareExpired(share)) return json(res, 404, { error: 'this link was revoked or has expired', code: 'share-gone' });
     const mine = share.userId === user.id;
     if (!mine) { share.opens = (share.opens || 0) + 1; saveSharesSoon(); }
-    json(res, 200, { id: share.id, author: share.author, created: share.created, expires: share.expires, mine,
+    json(res, 200, { id: share.id, author: share.author, created: share.created, expires: share.expires || null, mine,
       ...(mine ? { opens: share.opens || 0 } : {}), bundle: share.bundle });
   },
   'DELETE /api/shares/{id}': async (req, res) => {

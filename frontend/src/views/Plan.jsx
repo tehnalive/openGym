@@ -158,7 +158,7 @@ export default function Plan() {
       subtitle: has ? null : t('Add an exercise to a routine first. An empty plan has nothing to share.'),
       items: [
         { icon: 'share', label: t('Export plan file'), sub: t('A small file a friend can import into their own openGym. Routines only, none of your workouts or weigh-ins.'), disabled: !has, onClick: exportPlanFile },
-        { icon: 'share', label: 'Поделиться в Telegram', sub: 'Друг получит ссылку, которая откроет приложение с вашей программой. Её можно отозвать.', disabled: !has, onClick: sharePlanSheet },
+        { icon: 'share', label: 'Поделиться в Telegram', sub: 'Друг получит ссылку, которая откроет приложение с вашей программой.', disabled: !has, onClick: sharePlanSheet },
         { icon: 'note', label: t('Print / Save as PDF'), disabled: !has, onClick: printWholePlan },
         { icon: 'download', label: t('Import a plan file'), onClick: () => fileRef.current?.click() },
         { icon: 'clipboard', label: t('Load starter plan'), onClick: starterPlanSheet },
