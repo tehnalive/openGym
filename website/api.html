@@ -245,7 +245,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <p class="api-facts">
     <span>OpenAPI 3.1.0</span>
     <span>openGym v1.4.3</span>
-    <span>75 endpoints</span>
+    <span>82 endpoints</span>
     <span>AGPL-3.0-or-later</span>
   </p>
 
@@ -377,6 +377,122 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow rrow">
     <span class="r-code s4">401</span>
     <span class="p-desc">No session, expired/revoked session, or a disabled account.<span class="r-sig"><code>{&quot;error&quot;:&quot;not signed in&quot;}</code></span></span>
+  </div>
+    </div>
+  </div>
+</details>
+
+<details class="ep" id="op-telegramLogin">
+  <summary>
+    <span class="m post">POST</span>
+    <span class="ep-path"><code>/api/telegram/login</code></span>
+    <span class="ep-chev" aria-hidden="true"></span>
+    <span class="ep-sum">Sign in with Telegram Mini App data</span>
+  </summary>
+  <div class="ep-body">
+<p>Signs in (or creates) the profile bound to the Telegram account in the signed <code>initData</code> string the Mini App was launched with. The server verifies the HMAC with the bot token and rejects data older than five minutes. Names, usernames and <code>initDataUnsafe</code> never link or grant anything. Answers 403 <code>telegram-unavailable</code> when Telegram sign-in is not configured (no valid <code>TELEGRAM_BOT_TOKEN</code>, or a malformed <code>TELEGRAM_ALLOWED_IDS</code>), which is a server setting and not a refusal of the account.</p>
+    <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
+
+<p class="ep-h">Request body <span class="p-hint">(JSON)</span></p><div class="ptab">
+  <div class="prow">
+    <span class="p-name">initData<em class="p-req" title="required">required</em></span>
+    <span class="p-type">string</span>
+    <span class="p-desc">The raw <code>Telegram.WebApp.initData</code> string.</span>
+  </div>
+</div>
+    <p class="ep-h">Responses</p>
+    <div class="ptab">
+  <div class="prow rrow">
+    <span class="r-code s2">200</span>
+    <span class="p-desc">Signed in; the session cookie is set.<span class="r-sig">{ user: <a href="#schema-SessionUser">SessionUser</a> }</span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">401</span>
+    <span class="p-desc">The <code>initData</code> was missing, forged or expired (<code>telegram-auth</code>).</span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">403</span>
+    <span class="p-desc">Sign-in is unavailable on this server (<code>telegram-unavailable</code>), the account is not on the allowlist (<code>telegram-forbidden</code>), sign-up needs an allowlist entry (<code>invite</code>), or the account is disabled (<code>disabled</code>).</span>
+  </div>
+    </div>
+  </div>
+</details>
+
+<details class="ep" id="op-getTelegramNotifications">
+  <summary>
+    <span class="m get">GET</span>
+    <span class="ep-path"><code>/api/telegram/notifications</code></span>
+    <span class="ep-chev" aria-hidden="true"></span>
+    <span class="ep-sum">Telegram notification preferences</span>
+  </summary>
+  <div class="ep-body">
+<p>The signed-in Telegram account's opt-in settings for workout and weekly messages.</p>
+    <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
+
+
+    <p class="ep-h">Responses</p>
+    <div class="ptab">
+  <div class="prow rrow">
+    <span class="r-code s2">200</span>
+    <span class="p-desc">The stored preferences.<span class="r-sig">{ preferences: object }</span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">401</span>
+    <span class="p-desc">No session, expired/revoked session, or a disabled account.<span class="r-sig"><code>{&quot;error&quot;:&quot;not signed in&quot;}</code></span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">403</span>
+    <span class="p-desc">Telegram notifications are unavailable for this account or server.</span>
+  </div>
+    </div>
+  </div>
+</details>
+
+<details class="ep" id="op-setTelegramNotifications">
+  <summary>
+    <span class="m put">PUT</span>
+    <span class="ep-path"><code>/api/telegram/notifications</code></span>
+    <span class="ep-chev" aria-hidden="true"></span>
+    <span class="ep-sum">Change Telegram notification preferences</span>
+  </summary>
+  <div class="ep-body">
+<p>Stores the preferences on the Telegram-bound account, never on a caller-supplied chat id.</p>
+    <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
+
+<p class="ep-h">Request body <span class="p-hint">(JSON)</span></p><div class="ptab">
+  <div class="prow">
+    <span class="p-name">workoutUpdates<em class="p-req" title="required">required</em></span>
+    <span class="p-type">boolean</span>
+    <span class="p-desc"></span>
+  </div>
+  <div class="prow">
+    <span class="p-name">weeklySummary<em class="p-req" title="required">required</em></span>
+    <span class="p-type">boolean</span>
+    <span class="p-desc"></span>
+  </div>
+  <div class="prow">
+    <span class="p-name">timezone<em class="p-req" title="required">required</em></span>
+    <span class="p-type">string</span>
+    <span class="p-desc">An IANA time zone, e.g. Asia/Almaty.</span>
+  </div>
+</div>
+    <p class="ep-h">Responses</p>
+    <div class="ptab">
+  <div class="prow rrow">
+    <span class="r-code s2">200</span>
+    <span class="p-desc">The saved preferences.<span class="r-sig">{ preferences: object }</span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">400</span>
+    <span class="p-desc">The preferences are not valid.</span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">401</span>
+    <span class="p-desc">No session, expired/revoked session, or a disabled account.<span class="r-sig"><code>{&quot;error&quot;:&quot;not signed in&quot;}</code></span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">403</span>
+    <span class="p-desc">Telegram notifications are unavailable for this account or server.</span>
   </div>
     </div>
   </div>
@@ -1514,6 +1630,118 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <h2>Data</h2>
   <p class="sub">Per-user state sync (the whole app state as one JSON blob)</p>
   <div class="eps">
+
+<details class="ep" id="op-createShare">
+  <summary>
+    <span class="m post">POST</span>
+    <span class="ep-path"><code>/api/shares</code></span>
+    <span class="ep-chev" aria-hidden="true"></span>
+    <span class="ep-sum">Share a training plan by link</span>
+  </summary>
+  <div class="ep-body">
+<p>Stores a plan bundle (<code>buildPlanBundle</code> in the app) and returns a Telegram Mini App link <code>https://t.me/&lt;bot&gt;/&lt;app&gt;?startapp=p_&lt;id&gt;</code> (<code>TELEGRAM_BOT_USERNAME</code>, <code>TELEGRAM_MINI_APP_SHORT_NAME</code>; an empty short name gives the bot's main Mini App link). Only the shape is checked here (<code>opengym_plan: 1</code>, at least one routine with one exercise, at most 50 routines, 600 exercises and 200 KB); the recipient's app runs the full parser. Anyone signed in who holds the id can read the plan until it expires (<code>SHARE_TTL_DAYS</code>, default 30) or the author revokes it. At most <code>SHARE_MAX_PER_USER</code> (default 20) live links per profile and 10 new ones an hour.</p>
+    <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
+
+<p class="ep-h">Request body <span class="p-hint">(JSON)</span></p><div class="ptab">
+  <div class="prow">
+    <span class="p-name">bundle<em class="p-req" title="required">required</em></span>
+    <span class="p-type">object</span>
+    <span class="p-desc">A plan file: <code>opengym_plan</code>, <code>name</code>, <code>unit</code>, <code>week</code>, <code>routines</code>, <code>customEx</code>.</span>
+  </div>
+</div>
+    <p class="ep-h">Responses</p>
+    <div class="ptab">
+  <div class="prow rrow">
+    <span class="r-code s2">200</span>
+    <span class="p-desc">The link was created.<span class="r-sig">{ id: string, link: string, created: string <span class="p-hint">(date-time)</span>, expires: string <span class="p-hint">(date-time)</span> }</span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">400</span>
+    <span class="p-desc">Not a plan, empty or too large (<code>code: share-invalid</code>).</span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">401</span>
+    <span class="p-desc">No session, expired/revoked session, or a disabled account.<span class="r-sig"><code>{&quot;error&quot;:&quot;not signed in&quot;}</code></span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">409</span>
+    <span class="p-desc">The profile already has the maximum number of live links (<code>code: share-limit</code>).</span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">429</span>
+    <span class="p-desc">Paused by the sign-in throttle (see <i>Throttling</i> in the description). The request was not looked at; try again after <code>Retry-After</code> seconds.<span class="r-sig"><code>{&quot;error&quot;:&quot;too many attempts, try again later&quot;}</code></span></span>
+  </div>
+    </div>
+  </div>
+</details>
+
+<details class="ep" id="op-getShare">
+  <summary>
+    <span class="m get">GET</span>
+    <span class="ep-path"><code>/api/shares/{id}</code></span>
+    <span class="ep-chev" aria-hidden="true"></span>
+    <span class="ep-sum">Read a shared plan</span>
+  </summary>
+  <div class="ep-body">
+<p>The plan and who sent it, for any signed-in profile. The author is the display name only, never a Telegram id. <code>opens</code> (how many times someone else read it) is given to the author only. A revoked, expired or unknown id is the same <code>404</code> with <code>code: share-gone</code>.</p>
+    <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
+
+
+    <p class="ep-h">Responses</p>
+    <div class="ptab">
+  <div class="prow rrow">
+    <span class="r-code s2">200</span>
+    <span class="p-desc">The shared plan.<span class="r-sig">{ id: string, author: string, created: string <span class="p-hint">(date-time)</span>, expires: string <span class="p-hint">(date-time)</span>, mine: boolean, opens: integer, bundle: object }</span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">401</span>
+    <span class="p-desc">No session, expired/revoked session, or a disabled account.<span class="r-sig"><code>{&quot;error&quot;:&quot;not signed in&quot;}</code></span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">404</span>
+    <span class="p-desc">Revoked, expired or unknown (<code>code: share-gone</code>).</span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">429</span>
+    <span class="p-desc">Paused by the sign-in throttle (see <i>Throttling</i> in the description). The request was not looked at; try again after <code>Retry-After</code> seconds.<span class="r-sig"><code>{&quot;error&quot;:&quot;too many attempts, try again later&quot;}</code></span></span>
+  </div>
+    </div>
+  </div>
+</details>
+
+<details class="ep" id="op-revokeShare">
+  <summary>
+    <span class="m delete">DELETE</span>
+    <span class="ep-path"><code>/api/shares/{id}</code></span>
+    <span class="ep-chev" aria-hidden="true"></span>
+    <span class="ep-sum">Revoke a shared plan</span>
+  </summary>
+  <div class="ep-body">
+<p>Deletes the stored plan; the link stops working at once. Only the author can.</p>
+    <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
+
+
+    <p class="ep-h">Responses</p>
+    <div class="ptab">
+  <div class="prow rrow">
+    <span class="r-code s2">200</span>
+    <span class="p-desc">Revoked.<span class="r-sig">{ ok: boolean }</span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">401</span>
+    <span class="p-desc">No session, expired/revoked session, or a disabled account.<span class="r-sig"><code>{&quot;error&quot;:&quot;not signed in&quot;}</code></span></span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">403</span>
+    <span class="p-desc">The caller is not the author.</span>
+  </div>
+  <div class="prow rrow">
+    <span class="r-code s4">404</span>
+    <span class="p-desc">Already revoked, expired or unknown (<code>code: share-gone</code>).</span>
+  </div>
+    </div>
+  </div>
+</details>
 
 <details class="ep" id="op-getData">
   <summary>
