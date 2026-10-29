@@ -12,6 +12,7 @@ import { canDropPrivileges, privilegeRefusal } from './adapters/spawn.js';
 import { DATA_CATEGORIES } from './core/payload.js';
 import { validateBaseUrl, validateHeaders, baseUrlFor } from './core/providers.js';
 import { providerNotice } from './messages.js';
+import { envBaseUrl } from './adapters/opencode.js';
 
 // Job failures the user sees, in the app's own voice. The raw provider detail never reaches
 // them — it goes to the admin card, which is where someone can act on it (FR-47).
@@ -62,7 +63,7 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
         // Where an HTTPS provider's requests go, host only: the app asks once per provider and
         // host before anything is sent there, and a compatible endpoint is only nameable by it.
         // Never the path, and the base URL cannot carry credentials (validateBaseUrl).
-        host: hostOf(baseUrlFor(cfg.provider, cfg)),
+        host: hostOf(cfg.provider === 'opencode' ? (envBaseUrl() || baseUrlFor(cfg.provider, cfg)) : baseUrlFor(cfg.provider, cfg)),
         categories: DATA_CATEGORIES,
         version: 1
       });

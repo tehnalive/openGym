@@ -1,38 +1,38 @@
 #!/usr/bin/env node
-// One minimal request to OpenRouter with the key from OPENROUTER_API_KEY, to see on the server
+// One minimal request to OpenCode with the key from OPENCODE_API_KEY, to see on the server
 // that the key, the model and the network work before switching the Coach on. It prints the HTTP
 // status, the model, the time and the rate-limit headers. It never prints the key, never reads it
 // from a file or an argument, and sends no training data: the only prompt is a one-word question.
 //
-//   OPENROUTER_API_KEY=... node scripts/coach-openrouter-smoke.mjs
-//   OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash node scripts/coach-openrouter-smoke.mjs
+//   OPENCODE_API_KEY=... node scripts/coach-opencode-smoke.mjs
+//   OPENCODE_MODEL=deepseek-v4.1-flash OPENCODE_API_KEY=... node scripts/coach-opencode-smoke.mjs
 //
 // Exit code 0 on a 2xx answer, 1 on any other outcome, 2 when there is no key.
 import { fileURLToPath } from 'node:url';
 
-export const BASE = 'https://openrouter.ai/api/v1';
-export const DEFAULT_MODEL = 'nvidia/nemotron-3.5-super-vl:free';
+export const BASE = 'https://opencode.ai/inference';
+export const DEFAULT_MODEL = 'deepseek-v4.1-flash-free';
 
 const scrub = (text, key) => String(text).split(key).join('[key]').slice(0, 300);
 
 export async function smoke({ env = process.env, fetchImpl = globalThis.fetch, out = console.log, now = Date.now } = {}) {
-  const key = (env.OPENROUTER_API_KEY || '').trim();
+  const key = (env.OPENCODE_API_KEY || '').trim();
   if (!key) {
-    out('OPENROUTER_API_KEY is not set. Create a key at https://openrouter.ai/keys and export it for this command only.');
+    out('OPENCODE_API_KEY is not set. Create a key at https://opencode.ai/console and export it for this command only.');
     return 2;
   }
-  const model = (env.OPENROUTER_MODEL || '').trim() || DEFAULT_MODEL;
+  const model = (env.OPENCODE_MODEL || '').trim() || DEFAULT_MODEL;
   const started = now();
   let res;
   try {
-    res = await fetchImpl(BASE + '/chat/completions', {
+    res = await fetchImpl(((env.OPENCODE_BASE_URL || '').trim().replace(/\/+$/, '') || BASE) + '/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json', 'x-title': 'Zhimolost Coach smoke test' },
+      headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
       body: JSON.stringify({ model, max_tokens: 16, temperature: 0, messages: [{ role: 'user', content: 'Reply with one word: ok' }] }),
       signal: AbortSignal.timeout(60000)
     });
   } catch (e) {
-    out(`FAIL  could not reach openrouter.ai: ${scrub(e && e.message, key)}`);
+    out(`FAIL  could not reach opencode.ai: ${scrub(e && e.message, key)}`);
     return 1;
   }
   const ms = now() - started;
@@ -57,10 +57,10 @@ export async function smoke({ env = process.env, fetchImpl = globalThis.fetch, o
 }
 
 function hint(status) {
-  if (status === 401 || status === 403) return 'The key was refused: check that it was copied whole and has not been revoked at openrouter.ai/keys.';
+  if (status === 401 || status === 403) return 'The key was refused: check that it was copied whole and has not been revoked in the console at opencode.ai/console.';
   if (status === 402) return 'The account is out of credit; this model is not free.';
-  if (status === 404 || status === 400) return 'The model name may be wrong or retired: compare with https://openrouter.ai/api/v1/models.';
-  if (status === 429) return 'Rate limit: free models allow about 20 requests a minute and 50 a day on a new account. Wait, or add credit.';
+  if (status === 404 || status === 400) return 'The model name may be wrong or retired: compare with https://opencode.ai/inference/v1/models.';
+  if (status === 429) return 'Limit reached. If the message says free models work in OpenCode, this free model is refused outside OpenCode: set OPENCODE_MODEL to a paid one (deepseek-v4.1-flash) and add credit in the console.';
   return 'The provider had a problem; try again in a minute.';
 }
 

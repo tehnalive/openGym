@@ -439,9 +439,10 @@ const failureTitle = cls => ({
   nostate: 'The user\'s training data could not be read',
   off: 'The Coach was off when the job ran',
   toolarge: 'The user\'s training data made a request too large to send, so no provider was called',
-  ratelimit: 'The provider answered 429: rate limit, or the free daily quota is used up',
+  ratelimit: 'The provider answered 429: a rate limit is reached',
+  freeonly: 'The gateway refused a free model called from outside OpenCode (429 FreeUsageLimitError): pick a paid model in OPENCODE_MODEL',
   quota: 'The provider answered 402: the account is out of credit',
-  modelgone: 'The model is not available to this key (check OPENROUTER_MODEL)',
+  modelgone: 'The model is not available to this key (check OPENCODE_MODEL)',
   internal: 'Something went wrong on the server'
 }[cls] || cls || 'Failed')
 

@@ -20,7 +20,7 @@ const FILE = 'opengym-coach-consent.json'
 
 // The name a person knows the company by. A compatible endpoint is whatever it was pointed at,
 // so it is named by its host; the runtime providers on a server talk to the same companies.
-export const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google Gemini', claude: 'Anthropic', codex: 'OpenAI', openrouter: 'OpenRouter' }
+export const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google Gemini', claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode' }
 
 // The server's own words about where the data goes ({ ru, en } from /api/coach/disclosure), in the
 // language the app is showing. Null when the provider has none.
