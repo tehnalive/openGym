@@ -29,7 +29,7 @@ const PRESENCE = [
   ['Keyboard: watchKeyboardViewport', 'frontend/src/lib/use-sheet-keyboard.js', 'has', 'export function watchKeyboardViewport'],
   ['Keyboard: picker uses it', 'frontend/src/components/ui.jsx', 'has', 'watchKeyboardViewport(sync)'],
   ['Keyboard diagnostics module', 'frontend/src/lib/kb-debug.js', 'has', 'toggleKbDebug'],
-  ['Keyboard diagnostics: 7 taps in Settings', 'frontend/src/views/Settings.jsx', 'has', 'k.n < 7'],
+  ['Keyboard diagnostics: 7 taps in Settings', 'frontend/src/views/Settings.jsx', 'has', 'if (k.n < 7) return'],
   ['Boot page ignores foreign script errors', 'frontend/index.html', 'has', "t.src.indexOf(location.origin + '/') !== 0"],
   ['Telegram entry gate in App', 'frontend/src/App.jsx', 'has', "telegram && !['off', 'ready'].includes(telegram.status)"],
   ['First-run onboarding', 'frontend/src/App.jsx', 'has', 'FirstRunOnboarding'],

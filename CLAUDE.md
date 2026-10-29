@@ -11,6 +11,13 @@ installable as a PWA, and Capacitor apps for Android and iPhone (with an Apple W
 widgets) that work on their own or synced to a server. License: AGPL-3.0-or-later; the exercise
 media are licensed separately (NOTICE.md).
 
+## This fork
+
+This checkout is the Telegram Mini App fork «Жимолость» (see UPSTREAM.md). The patches on top of upstream are
+listed in [docs/telegram/FORK_PATCHES.md](docs/telegram/FORK_PATCHES.md); read it before touching the files it names.
+`npm run fork:check` (repo root) checks that they are still in place and runs their guard tests: run it after every
+upstream merge and before every deploy. Merge procedure: UPSTREAM.md, «How to update from upstream».
+
 ## Project layout
 
 ```

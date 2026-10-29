@@ -47,7 +47,7 @@ describe('Settings: seven taps on the version switch the keyboard diagnostics', 
   const src = read('frontend/src/views/Settings.jsx')
   it('wires the tap counter to toggleKbDebug', () => {
     expect(src).toMatch(/import \{[^}]*toggleKbDebug[^}]*\} from '..\/lib\/kb-debug\.js'/)
-    expect(src).toMatch(/k\.n < 7/)
+    expect(src).toContain('if (k.n < 7) return')
     expect(src).toMatch(/toggleKbDebug\(\)/)
     expect(src).toMatch(/startKbDebug\(\)/)
   })
