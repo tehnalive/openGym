@@ -52,6 +52,7 @@ function ConsentSheet({ target, onAnswer }) {
       {sharedLines().map(line => <div key={line} className="ob-consent-row"><Icon name="check" /><div><span>{line}</span></div></div>)}
     </div>
     <div className="ob-fine">
+      {target.notice && <div>{target.notice}</div>}
       <div>{t('Your name, email and sign-in stay put. {0} handles the rest under its own privacy terms.', target.name)}</div>
       <div>{t('Change your mind anytime under AI data sharing in the Coach menu.')}</div>
     </div>

@@ -19,7 +19,18 @@ services:
       ALLOW_GUEST: ${ALLOW_GUEST:-0}
       PASSWORD_LOGIN: ${PASSWORD_LOGIN:-0}
       FIRST_USER_ADMIN: ${FIRST_USER_ADMIN:-0}
-      COACH_DISABLED: 1
+      # AI Coach is off until COACH_DISABLED=0 in .env (docs/telegram/COACH.md). The OpenRouter key
+      # is read from the environment only; an empty value keeps the Coach unreachable.
+      COACH_DISABLED: ${COACH_DISABLED:-1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      OPENROUTER_FALLBACK_MODEL: ${OPENROUTER_FALLBACK_MODEL:-}
+      COACH_OPENROUTER_NO_TRAINING: ${COACH_OPENROUTER_NO_TRAINING:-0}
+      # OpenRouter's free models allow about 50 requests a day per account, 20 a minute.
+      COACH_PER_USER_DAILY_MAX: ${COACH_PER_USER_DAILY_MAX:-5}
+      COACH_INSTANCE_DAILY_MAX: ${COACH_INSTANCE_DAILY_MAX:-20}
+      COACH_JOB_TIMEOUT_MS: ${COACH_JOB_TIMEOUT_MS:-300000}
+      COACH_MAX_PAYLOAD_CHARS: ${COACH_MAX_PAYLOAD_CHARS:-150000}
       # Personal media sync needs additional owner-bound transport checks before enabling.
       MEDIA_UPLOADS: 0
       # Profiles come only from Telegram's signed launch data: no passkey, password or pairing routes.

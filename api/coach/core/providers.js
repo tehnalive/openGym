@@ -42,10 +42,22 @@ export const HTTP_PROVIDERS = Object.freeze({
     defaultBase: null, baseUrl: true, keyOptional: true,
     defaultModel: null,
     keyPlaceholder: '(optional)'
+  }),
+  // The Telegram build's provider. `serverOnly`: the key lives in the server's environment
+  // (OPENROUTER_API_KEY) and nowhere else, so a phone with its own key never offers it and the
+  // admin card has no key field for it. The model comes from OPENROUTER_MODEL; defaultModel is
+  // the free model checked against openrouter.ai/api/v1/models on 2026-10-30 (docs/telegram/COACH.md).
+  openrouter: Object.freeze({
+    label: 'OpenRouter', runtime: 'HTTPS', http: true, serverOnly: true, envKey: true,
+    apiKeyEnv: 'OPENROUTER_API_KEY', oauthEnv: null,
+    defaultBase: 'https://openrouter.ai/api/v1',
+    defaultModel: 'nvidia/nemotron-3.5-super-vl:free',
+    keyPlaceholder: 'sk-or-…'
   })
 });
 
-export const HTTP_PROVIDER_IDS = Object.freeze(Object.keys(HTTP_PROVIDERS));
+// What a phone with its own key may pick from: the server-only providers stay out of its list.
+export const HTTP_PROVIDER_IDS = Object.freeze(Object.keys(HTTP_PROVIDERS).filter(id => !HTTP_PROVIDERS[id].serverOnly));
 
 /** The base URL a provider will actually be called at: the configured override, else the default. */
 export function baseUrlFor(id, cfg) {

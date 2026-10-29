@@ -17,7 +17,7 @@ import { DAYN } from '../lib/format.js'
 import { EXDB } from '../lib/exercises.js'
 import { emptyCoach, coachAvailable, hasConsent, CONSENT_VERSION, CATEGORY_TEXT, appendChat, defaultTrainingDays } from '../lib/coach.js'
 import { requestPlan, disclosure, JOB_ERRORS, isDeclined, coachVia } from '../lib/coach-api.js'
-import { consentTarget, allowAi } from '../lib/coach-consent.js'
+import { consentTarget, allowAi, noticeText } from '../lib/coach-consent.js'
 import { DEMO } from '../lib/demo.js'
 import { useCoachGate } from '../lib/use-coach-gate.js'
 import { MOBILE } from '../lib/mobile.js'
@@ -285,6 +285,7 @@ function Consent({ onAgree, onDecline }) {
     </div>
     <div className="ob-fine">
       <div>{who}</div>
+      {noticeText(info?.notice) && <div>{noticeText(info.notice)}</div>}
       <div>{t('Your name, your sign-in details and everything else about your account stay here. Other people’s data is never included.')}</div>
       <div style={{ color: 'var(--yellow)' }}>{t('The Coach is not a doctor or a physiotherapist. If something hurts, ask a professional.')}</div>
     </div>

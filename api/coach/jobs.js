@@ -28,6 +28,7 @@ import { handleFor } from './handle.js';
 import { fetchFor } from './node-fetch.js';
 import { privilegeRefusal, unprivilegedIds } from './adapters/spawn.js';
 import { cohortForPayload, invalidate as invalidateCohort } from './cohort.js';
+import { classifyProviderFailure, failureMessage } from './messages.js';
 
 // The prompt assembly, the plan fingerprint and the invoke→parse→validate→repair loop all
 // live in ./core now, where the phone can import them too. Re-exported so nothing that
@@ -43,6 +44,9 @@ export const TIMEOUT_MS = Math.max(60000, +process.env.COACH_JOB_TIMEOUT_MS || 5
 const MAX_CONCURRENT = 2;          // these are minutes-scale jobs on often-single-core boxes
 const PENDING_DAYS = 14;           // FR-33
 const HISTORY_MAX = 20;
+// A smaller ceiling on what one request may carry, for a free model with a request budget of its
+// own. Never above payload.js's MAX_PAYLOAD_CHARS; unset means that one.
+const maxPayloadChars = () => { const n = Math.floor(+process.env.COACH_MAX_PAYLOAD_CHARS); return n > 0 ? Math.min(n, payloadLib.MAX_PAYLOAD_CHARS) : payloadLib.MAX_PAYLOAD_CHARS; };
 
 /* ---------- per-user store ---------- */
 
@@ -117,7 +121,7 @@ function bumpDaily(uid) {
   return daily.count;
 }
 export function capState(uid) {
-  const caps = cfgStore.load().caps || {};
+  const caps = cfgStore.effectiveCaps();
   const rec = readUser(uid);
   const used = rec.daily?.date === todayISO() ? rec.daily.count : 0;
   return { used, limit: caps.perProfileDaily || 0 };
@@ -156,7 +160,7 @@ export function status(uid) {
 }
 function lastOutcome(rec) {
   const h = (rec.history || []).at(-1);
-  return h ? { id: h.id, kind: h.kind, outcome: h.outcome, errorClass: h.errorClass || null, at: h.at, ...(h.trigger === 'scheduled' ? { trigger: 'scheduled' } : {}), ...(h.reading ? { reading: h.reading } : {}) } : null;
+  return h ? { id: h.id, kind: h.kind, outcome: h.outcome, errorClass: h.errorClass || null, ...(h.message ? { message: h.message } : {}), at: h.at, ...(h.trigger === 'scheduled' ? { trigger: 'scheduled' } : {}), ...(h.reading ? { reading: h.reading } : {}) } : null;
 }
 function archive(uid, rec, outcome) {
   const history = [...(rec.history || []), {
@@ -221,7 +225,7 @@ export function enqueue(uid, opts) {
   if (refusal) throw new CoachError('unprivileged', refusal);
 
   // The caps, before the bind for the same reason: a job refused for the day spends nothing.
-  const caps = cfgStore.load().caps || {};
+  const caps = cfgStore.effectiveCaps();
   const { used, limit } = capState(uid);
   if (limit > 0 && used >= limit) throw new CoachError('cap', 'daily limit reached');
   if (caps.instanceDaily > 0 && instanceUsedToday() >= caps.instanceDaily) throw new CoachError('cap', 'this instance has reached its daily limit');
@@ -292,6 +296,9 @@ function finish(job, result) {
   const history = [...(rec.history || []), {
     id: job.id, kind: job.kind, trigger: job.trigger, outcome: result.outcome,
     errorClass: result.errorClass || null, at: Date.now(),
+    // The words for a class the app has no line for (a free model out of requests), in the
+    // language the job was started in. Fixed text, never the provider's own message.
+    ...(failureMessage(result.errorClass, job.lang) ? { message: failureMessage(result.errorClass, job.lang) } : {}),
     // "Nothing to change" is an answer with a reason attached, and throwing the reason away
     // leaves the user with a job that finished and nothing to show for it. It lives here, in
     // the profile's own file — deliberately not in `detail`, which goes to the instance log
@@ -360,7 +367,7 @@ async function execute(job) {
   // wrote. The builder bounds each field; a payload that is still bigger than any real training
   // history makes is refused here, before a provider is called, rather than sent and billed.
   const size = JSON.stringify(payload).length;
-  if (size > payloadLib.MAX_PAYLOAD_CHARS) {
+  if (size > maxPayloadChars()) {
     return finish(job, { outcome: 'failed', errorClass: 'toolarge', detail: `payload of ${Math.round(size / 1000)}k characters` });
   }
 
@@ -381,7 +388,10 @@ async function execute(job) {
     });
     if (!attempt.ok) {
       // Cancelled by a forget, not failed by the provider: the log must not blame the job budget.
-      const errorClass = ctl.signal.aborted ? 'forgotten' : attempt.errorClass;
+      // A provider that answered 429/402/404 says so in its status; the lifter gets words for
+      // that rather than "couldn't run, ask the owner to check the setup".
+      const errorClass = ctl.signal.aborted ? 'forgotten'
+        : (attempt.errorClass === 'provider' && classifyProviderFailure(attempt.detail)) || attempt.errorClass;
       return finish(job, { outcome: 'failed', errorClass, detail: attempt.detail || whyUnusable(attempt.errors) });
     }
     if (attempt.nochange) {

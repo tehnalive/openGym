@@ -11,6 +11,7 @@ import { adapterFor } from './adapters/index.js';
 import { canDropPrivileges, privilegeRefusal } from './adapters/spawn.js';
 import { DATA_CATEGORIES } from './core/payload.js';
 import { validateBaseUrl, validateHeaders, baseUrlFor } from './core/providers.js';
+import { providerNotice } from './messages.js';
 
 // Job failures the user sees, in the app's own voice. The raw provider detail never reaches
 // them — it goes to the admin card, which is where someone can act on it (FR-47).
@@ -53,6 +54,9 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
       if (!readSession(req)) return json(res, 401, { error: 'not signed in' });
       const cfg = cfgStore.load();
       json(res, 200, {
+        // Instance-specific words about where the data goes (api/coach/messages.js); null for a
+        // provider the app's own consent text already describes. Never the key or the base URL.
+        notice: providerNotice(cfg.provider, cfgStore.modelFor(cfg)),
         provider: cfg.provider,
         providerLabel: cfgStore.providerMeta(cfg).label,
         // Where an HTTPS provider's requests go, host only: the app asks once per provider and
@@ -185,11 +189,12 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
         provider: cfg.provider,
         providers: Object.entries(cfgStore.PROVIDERS).map(([id, p]) => ({
           id, label: p.label, runtime: p.runtime,
-          setupToken: !!p.setupToken, deviceLogin: !!p.deviceLogin, apiKey: !!p.apiKeyEnv,
+          // A key that lives in the server's environment is not one the card can paste.
+          setupToken: !!p.setupToken, deviceLogin: !!p.deviceLogin, apiKey: !!p.apiKeyEnv && !p.envKey, envKey: p.envKey ? p.apiKeyEnv : null,
           http: !!p.http, baseUrl: !!p.baseUrl, keyOptional: !!p.keyOptional, keyPlaceholder: p.keyPlaceholder || null,
           defaultModel: p.defaultModel || null,
           // Which providers already hold a key — so switching chips is visibly not a reset.
-          connected: !!(cfgStore.authFor(cfg, id) && cfgStore.authFor(cfg, id).data)
+          connected: p.envKey ? !!(process.env[p.apiKeyEnv] || '').trim() : !!(cfgStore.authFor(cfg, id) && cfgStore.authFor(cfg, id).data)
         })),
         model: cfgStore.modelFor(cfg),
         models: cfg.models,
@@ -200,6 +205,8 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
         headers: cfgStore.providerMeta(cfg).http ? (cfgStore.optionsFor(cfg).headers || null) : null,
         knownModels: check.models || null,
         caps: cfg.caps,
+        capsEffective: cfgStore.effectiveCaps(cfg),
+        capsCeiling: cfgStore.capCeilings(),
         maxMessageLen: cfg.maxMessageLen,
         maxOutputTokens: cfg.maxOutputTokens,
         community: !!cfg.community,
@@ -214,6 +221,8 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
           const meta = cfgStore.providerMeta(cfg);
           const rec = cfgStore.authFor(cfg);
           if (!meta.oauthEnv && !meta.apiKeyEnv) return { state: 'not-required' };
+          // Env-held key: present or not, nothing else to say about it.
+          if (meta.envKey) return cfgStore.credentialFor(null).ok ? { state: 'connected', type: 'apikey', account: 'server environment', connectedAt: null } : { state: 'none' };
           if (!rec || !rec.data) return { state: meta.keyOptional ? 'optional' : 'none' };
           if (!cfgStore.decrypt(rec.data)) return { state: 'unreadable' };
           return { state: 'connected', type: rec.type || null, account: rec.account || null, connectedAt: rec.connectedAt || null };
@@ -337,6 +346,7 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
       const provider = body.provider !== undefined ? String(body.provider) : cfg.provider;
       if (!cfgStore.PROVIDERS[provider]) return json(res, 400, { error: 'unknown provider' });
       const meta = cfgStore.PROVIDERS[provider];
+      if (meta.envKey) return json(res, 400, { error: `the ${provider} key is set in the server environment (${meta.apiKeyEnv}), not here` });
       const type = String(body.type || '');
       const envVar = (type === 'cli-token' || type === 'oauth') ? meta.oauthEnv
         : type === 'apikey' ? meta.apiKeyEnv : null;

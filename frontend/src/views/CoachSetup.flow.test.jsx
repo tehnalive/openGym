@@ -163,7 +163,7 @@ describe('CoachSetup — "use my self-hosted openGym"', () => {
 describe('CoachSetup — bringing your own key', () => {
   it('offers exactly the providers the shared table lists, Anthropic first', async () => {
     await mount(); await openByok()
-    expect(all('.chip').map(c => c.textContent)).toEqual(Object.values(HTTP_PROVIDERS).map(p => p.label))
+    expect(all('.chip').map(c => c.textContent)).toEqual(Object.values(HTTP_PROVIDERS).filter(p => !p.serverOnly).map(p => p.label))
     expect(chip('Anthropic API').classList.contains('on')).toBe(true)
   })
 

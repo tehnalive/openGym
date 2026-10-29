@@ -183,7 +183,26 @@ export function reset() { cache = null; keyCache = null; }
 /* ---------- what one provider owns ----------
    The only way the rest of the code reads the per-provider maps, so the shape stays here. */
 export const authFor = (cfg = load(), p = cfg.provider) => (cfg.auth && cfg.auth[p]) || null;
-export const modelFor = (cfg = load(), p = cfg.provider) => (cfg.models && cfg.models[p]) || (PROVIDERS[p] && PROVIDERS[p].defaultModel) || null;
+// OpenRouter's model is the operator's: OPENROUTER_MODEL in the server environment wins over
+// anything stored, so the free model can be swapped (or replaced by a paid one) without opening
+// the admin card, and a model name typed there cannot silently override a paid-model decision.
+export const modelFor = (cfg = load(), p = cfg.provider) => {
+  const env = p === 'openrouter' ? (process.env.OPENROUTER_MODEL || '').trim() : '';
+  return env || (cfg.models && cfg.models[p]) || (PROVIDERS[p] && PROVIDERS[p].defaultModel) || null;
+};
+/* The operator's ceilings on the daily caps, from the environment. The admin card may lower a cap
+   but not raise it past these, and a stored 0 ("unlimited") still ends at the ceiling. OpenRouter's
+   free models allow about 50 requests a day per account, so the instance has to count too. */
+const ceiling = name => { const n = Math.floor(+process.env[name]); return n > 0 ? n : 0; };
+export function effectiveCaps(cfg = load()) {
+  const stored = cfg.caps || {};
+  const lim = (own, cap) => (cap > 0 ? (own > 0 ? Math.min(own, cap) : cap) : (own || 0));
+  return {
+    perProfileDaily: lim(stored.perProfileDaily, ceiling('COACH_PER_USER_DAILY_MAX')),
+    instanceDaily: lim(stored.instanceDaily, ceiling('COACH_INSTANCE_DAILY_MAX'))
+  };
+}
+export const capCeilings = () => ({ perProfileDaily: ceiling('COACH_PER_USER_DAILY_MAX'), instanceDaily: ceiling('COACH_INSTANCE_DAILY_MAX') });
 export const optionsFor = (cfg = load(), p = cfg.provider) => (cfg.providerOptions && cfg.providerOptions[p]) || {};
 export const boundUidFor = (cfg = load(), p = cfg.provider) => (cfg.boundUid && cfg.boundUid[p]) || null;
 export function saveAuth(provider, auth) {
@@ -242,6 +261,13 @@ export const SHARED_ACCOUNT_REFUSAL =
 export function credentialFor(uid) {
   const cfg = load();
   if (cfg.provider === 'fixture') return { ok: true, auth: null, mode: cfg.authMode };
+
+  // A provider whose key lives in the server environment: no stored record, no per-profile
+  // account, no binding. The key is read here, per call, and travels only into jobEnv().
+  if (providerMeta(cfg).envKey) {
+    const token = (process.env[providerMeta(cfg).apiKeyEnv] || '').trim();
+    return token ? { ok: true, auth: { token }, type: 'apikey', account: null, mode: 'instance' } : { ok: false, reason: 'no-credential', mode: 'instance' };
+  }
 
   if (cfg.authMode === 'profile') {
     const rec = loadProfileAuth(uid);
@@ -317,6 +343,7 @@ export function isConnected() {
   const cfg = load();
   if (!isEnabled()) return false;
   if (cfg.provider === 'fixture') return true;
+  if (providerMeta(cfg).envKey) return credentialFor(null).ok;
   if (cfg.authMode === 'profile') return true;
   const rec = authFor(cfg);
   if (!rec) return !!providerMeta(cfg).keyOptional && !!baseUrlFor(cfg.provider, cfg);
