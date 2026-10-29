@@ -12,7 +12,8 @@
  */
 import { CONTRACT } from './payload.js';
 import { buildPrompt, buildPromptParts } from './prompt.js';
-import { SCHEMAS } from './schemas.js';
+import { schemaFor } from './schemas.js';
+import { flaggedOnTopic, answerAllowed, refusalProposal } from './guard.js';
 import { extractJSON, contractOK } from './parse.js';
 import { validatePlan, validateReview, validateDebrief, validateAsk } from './validate.js';
 import { isChangeList, changesOntoPlan } from './refine-changes.js';
@@ -23,15 +24,18 @@ import { isChangeList, changesOntoPlan } from './refine-changes.js';
  * @returns {{ ok:true, nochange?:boolean, reading?:string, result?:object }
  *        | { ok:false, errorClass:string, detail?:string, repairable?:boolean, errors?:string[], raw?:string }}
  */
-export async function attemptOnce({ adapter, cfg, kind, payload, model, timeoutMs, invokeOpts = {} }, repair) {
+export async function attemptOnce({ adapter, cfg, kind, payload, model, timeoutMs, invokeOpts = {}, guard = false }, repair) {
   // HTTP providers get the rules/payload split (prefix caching, schema-constrained decoding);
   // the runtime-backed CLIs still get one flat prompt — they have no message roles to split over.
-  const parts = buildPromptParts(kind, payload, repair);
+  const parts = buildPromptParts(kind, payload, repair, { guard });
+  // With the topic guard on, a question in the chat never fails on its content: whatever the model
+  // sent that is not a flagged, well-formed, allowed answer becomes the fixed refusal.
+  const askGuard = guard && kind === 'ask';
   const split = adapter.spawns === false;
   const r = await adapter.invoke({
     cfg,
     prompt: split ? parts.user : parts.system + '\n\n---\n\n' + parts.user,
-    ...(split ? { system: parts.system, schema: SCHEMAS[parts.task] || null } : {}),
+    ...(split ? { system: parts.system, schema: schemaFor(parts.task, guard) } : {}),
     model: model || null, timeoutMs, ...invokeOpts
   });
 
@@ -49,9 +53,25 @@ export async function attemptOnce({ adapter, cfg, kind, payload, model, timeoutM
   }
 
   const parsed = extractJSON(r.text);
+  if (parsed.error && askGuard) return { ok: true, result: refusalProposal() };
   if (parsed.error) return { ok: false, repairable: !repair, errors: [parsed.error], raw: r.text, errorClass: 'unusable' };
+  if (askGuard && !contractOK(parsed.value)) return { ok: true, result: refusalProposal() };
   if (!contractOK(parsed.value)) {
     return { ok: false, repairable: !repair, errors: [`coach_contract must be ${CONTRACT}`], raw: r.text, errorClass: 'unusable' };
+  }
+
+  if (guard && !askGuard) {
+    const flag = parsed.value && parsed.value.on_topic;
+    // Said to be off topic: a failure of its own, no repair round, nothing of the answer kept.
+    if (flag === false) return { ok: false, errorClass: 'offtopic' };
+    if (typeof flag !== 'boolean') return { ok: false, repairable: !repair, errors: ['on_topic is required: true when the request is about the lifter training, false otherwise'], raw: r.text, errorClass: 'unusable' };
+  }
+  if (askGuard) {
+    // Strictly `true`, a valid answer and no links or code; the model's text is used only if all hold.
+    const checkedAsk = flaggedOnTopic(parsed.value) ? validateAsk(parsed.value) : null;
+    return checkedAsk && checkedAsk.ok && answerAllowed(checkedAsk.proposal.answer)
+      ? { ok: true, result: checkedAsk.proposal }
+      : { ok: true, result: refusalProposal() };
   }
 
   // Everything above is transport: did the provider answer, is there a JSON object in what it

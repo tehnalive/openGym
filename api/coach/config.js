@@ -202,6 +202,27 @@ export function effectiveCaps(cfg = load()) {
     instanceDaily: lim(stored.instanceDaily, ceiling('COACH_INSTANCE_DAILY_MAX'))
   };
 }
+/* "Only free models" is a hard rule of the Telegram build, not a convention: with it on (the
+   default; OPENROUTER_ONLY_FREE=0 turns it off) a model id has to be a `:free` variant or the one
+   free router, and anything else keeps the Coach unreachable with a reason the admin card shows.
+   The id is checked three times: here when the Coach is asked whether it is connected, in the
+   admin route that stores a model, and in the adapter right before a request is built. The
+   request itself carries a single `model` and no `models` list, `route` or plugins, so nothing
+   on the wire can move it onto a paid model (OpenRouter bills a fallback at the fallback's
+   price). */
+export const FREE_ROUTERS = Object.freeze(['openrouter/free']);
+export const onlyFree = () => !/^(0|false|no|off)$/i.test((process.env.OPENROUTER_ONLY_FREE || '').trim());
+export const isFreeModel = id => FREE_ROUTERS.includes(id) || /^[a-z0-9][a-z0-9._-]*\/[a-z0-9._-]+:free$/i.test(String(id || ''));
+export const fallbackModelId = () => (process.env.OPENROUTER_FALLBACK_MODEL || '').trim() || null;
+/** Why the configured OpenRouter models are refused, or null. Names the variable, never a key. */
+export function freeProblem(cfg = load()) {
+  if (cfg.provider !== 'openrouter' || !onlyFree()) return null;
+  const model = modelFor(cfg);
+  if (!isFreeModel(model)) return `OPENROUTER_ONLY_FREE is on and the model "${String(model).slice(0, 80)}" is not a free one (it must end in :free, or be openrouter/free)`;
+  const fb = fallbackModelId();
+  if (fb && !isFreeModel(fb)) return `OPENROUTER_ONLY_FREE is on and OPENROUTER_FALLBACK_MODEL "${fb.slice(0, 80)}" is not a free one`;
+  return null;
+}
 export const capCeilings = () => ({ perProfileDaily: ceiling('COACH_PER_USER_DAILY_MAX'), instanceDaily: ceiling('COACH_INSTANCE_DAILY_MAX') });
 export const optionsFor = (cfg = load(), p = cfg.provider) => (cfg.providerOptions && cfg.providerOptions[p]) || {};
 export const boundUidFor = (cfg = load(), p = cfg.provider) => (cfg.boundUid && cfg.boundUid[p]) || null;
@@ -343,7 +364,7 @@ export function isConnected() {
   const cfg = load();
   if (!isEnabled()) return false;
   if (cfg.provider === 'fixture') return true;
-  if (providerMeta(cfg).envKey) return credentialFor(null).ok;
+  if (providerMeta(cfg).envKey) return credentialFor(null).ok && !freeProblem(cfg);
   if (cfg.authMode === 'profile') return true;
   const rec = authFor(cfg);
   if (!rec) return !!providerMeta(cfg).keyOptional && !!baseUrlFor(cfg.provider, cfg);

@@ -14,7 +14,7 @@ export const taskOf = (kind, payload) =>
  * re-processed, which on a CPU box is most of the wall time. Cloud providers get the same
  * split as system/user messages (and Anthropic caches the system block explicitly).
  */
-export function buildPromptParts(kind, payload, repair) {
+export function buildPromptParts(kind, payload, repair, { guard = false } = {}) {
   const task = taskOf(kind, payload);
   // A revision answers in the plan's own format, and refine.md only says "the same schema as
   // before". Without create.md's Output section in front of it a model that does not enforce
@@ -22,7 +22,8 @@ export function buildPromptParts(kind, payload, repair) {
   // plan format to follow at all, and a request like "swap the leverage machine" came back as
   // a review-style change list the plan validator can only reject (#471).
   const rules = task === 'refine' ? PROMPTS.create + '\n\n---\n\n' + PROMPTS.refine : PROMPTS[task];
-  const system = PROMPTS.common + '\n\n---\n\n' + rules;
+  // The guard's rules come first, ahead of everything else the model is told.
+  const system = (guard ? PROMPTS.guard + '\n\n---\n\n' : '') + PROMPTS.common + '\n\n---\n\n' + rules;
   // Compact JSON, not pretty-printed: the indentation was ~30% of the payload's tokens and
   // a model reads either just as well.
   let user = '## Payload\n\n```json\n' + JSON.stringify(payload) + '\n```\n';
@@ -35,7 +36,7 @@ export function buildPromptParts(kind, payload, repair) {
 }
 
 /** The two parts as one string — what the runtime-backed adapters (CLI) still consume. */
-export function buildPrompt(kind, payload, repair) {
-  const p = buildPromptParts(kind, payload, repair);
+export function buildPrompt(kind, payload, repair, opts) {
+  const p = buildPromptParts(kind, payload, repair, opts);
   return p.system + '\n\n---\n\n' + p.user;
 }

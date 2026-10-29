@@ -118,4 +118,11 @@ export const ASK_SCHEMA = {
   required: ['coach_contract', 'answer']
 };
 
+/** The schema for a task; with the topic guard on, `on_topic` is a required boolean. */
+export function schemaFor(task, guard) {
+  const base = SCHEMAS[task] || null;
+  if (!base || !guard) return base;
+  return { ...base, properties: { ...base.properties, on_topic: { type: 'boolean' } }, required: [...(base.required || []), 'on_topic'] };
+}
+
 export const SCHEMAS = { review: REVIEW_SCHEMA, create: CREATE_SCHEMA, refine: CREATE_SCHEMA, debrief: DEBRIEF_SCHEMA, ask: ASK_SCHEMA };

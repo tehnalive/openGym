@@ -25,6 +25,8 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
       OPENROUTER_FALLBACK_MODEL: ${OPENROUTER_FALLBACK_MODEL:-}
+      # Hard rule: only :free models (or openrouter/free). A paid id keeps the Coach switched off.
+      OPENROUTER_ONLY_FREE: ${OPENROUTER_ONLY_FREE:-1}
       COACH_OPENROUTER_NO_TRAINING: ${COACH_OPENROUTER_NO_TRAINING:-0}
       # OpenRouter's free models allow about 50 requests a day per account, 20 a minute.
       COACH_PER_USER_DAILY_MAX: ${COACH_PER_USER_DAILY_MAX:-5}

@@ -121,13 +121,15 @@ export default function AdminCoach() {
   </div>
 
   const meta = d.providers.find(p => p.id === d.provider) || {}
+  const configProblem = d.configProblem || null
   const authState = d.auth?.state
   const authed = authState === 'connected' || authState === 'not-required' || authState === 'optional'
   const needsEndpoint = !!meta.baseUrl
   const hasEndpoint = !needsEndpoint || !!d.baseUrl
-  const live = d.enabled && d.runtime.ok && authed && hasEndpoint
+  const live = d.enabled && d.runtime.ok && authed && hasEndpoint && !configProblem
 
   const status = !d.enabled ? 'Off. Users won’t see the Coach anywhere in the app.'
+    : configProblem ? 'On, but refused: ' + configProblem
     : live ? <>On · {meta.label}{d.model ? ' · ' + d.model : ''}</>
       : !hasEndpoint ? 'On, but no endpoint yet. Finish step 2.'
         : !authed ? 'On, but no credential yet. Finish the Credential step.'
@@ -440,6 +442,7 @@ const failureTitle = cls => ({
   off: 'The Coach was off when the job ran',
   toolarge: 'The user\'s training data made a request too large to send, so no provider was called',
   ratelimit: 'The provider answered 429: rate limit, or the free daily quota is used up',
+  offtopic: 'The model marked the request as not about training; the user was shown the fixed refusal',
   quota: 'The provider answered 402: the account is out of credit',
   modelgone: 'The model is not available to this key (check OPENROUTER_MODEL)',
   internal: 'Something went wrong on the server'

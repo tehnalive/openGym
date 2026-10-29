@@ -7,6 +7,8 @@
  *
  * Nothing here carries a key, a URL with credentials or a provider's raw error text. */
 
+import { REFUSAL } from './core/guard.js';
+
 const ru = lang => /^ru\b/i.test(String(lang || ''));
 
 /* Why a job failed, for the classes the app has no line for. The class is decided in jobs.js from
@@ -15,6 +17,10 @@ const FAILURES = {
   ratelimit: {
     ru: 'Бесплатная нейросеть сейчас перегружена или лимит запросов исчерпан. Попробуйте через несколько минут; если не помогает, лимит закончился на сегодня, повторите завтра.',
     en: 'The free AI model is busy or its request limit is used up. Try again in a few minutes; if it keeps failing, the limit is spent for today.'
+  },
+  offtopic: {
+    ru: REFUSAL,
+    en: REFUSAL
   },
   quota: {
     ru: 'У сервиса нейросети закончились средства на счёте. Владельцу сервера нужно проверить аккаунт OpenRouter.',

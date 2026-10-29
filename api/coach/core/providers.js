@@ -49,6 +49,8 @@ export const HTTP_PROVIDERS = Object.freeze({
   // the free model checked against openrouter.ai/api/v1/models on 2026-10-30 (docs/telegram/COACH.md).
   openrouter: Object.freeze({
     label: 'OpenRouter', runtime: 'HTTPS', http: true, serverOnly: true, envKey: true,
+    // Answers pass the on-topic guard (core/pipeline.js `guard`): the flag, the fixed refusal.
+    guarded: true,
     apiKeyEnv: 'OPENROUTER_API_KEY', oauthEnv: null,
     defaultBase: 'https://openrouter.ai/api/v1',
     defaultModel: 'nvidia/nemotron-3.5-super-vl:free',

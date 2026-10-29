@@ -59,7 +59,7 @@ export async function smoke({ env = process.env, fetchImpl = globalThis.fetch, o
 function hint(status) {
   if (status === 401 || status === 403) return 'The key was refused: check that it was copied whole and has not been revoked at openrouter.ai/keys.';
   if (status === 402) return 'The account is out of credit; this model is not free.';
-  if (status === 404 || status === 400) return 'The model name may be wrong or retired: compare with https://openrouter.ai/api/v1/models.';
+  if (status === 404 || status === 400) return 'The model name may be wrong or retired (compare with https://openrouter.ai/api/v1/models), or, for a free model, "No endpoints found": allow free endpoints in https://openrouter.ai/settings/privacy.';
   if (status === 429) return 'Rate limit: free models allow about 20 requests a minute and 50 a day on a new account. Wait, or add credit.';
   return 'The provider had a problem; try again in a minute.';
 }
