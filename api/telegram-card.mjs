@@ -141,6 +141,7 @@ export function cardModel(workout, state, lang, phraseIndex = 0) {
     muscleNames: muscleNames.map(upperFirst),
     record: best ? { name: best.name, text: `${formatNumber(best.w, l)} ${unit} × ${best.r}` } : null,
     journal: journal > 0 ? journal : 0,
+    accent: cardAccent(state),
   };
 }
 
@@ -159,8 +160,43 @@ const LABELS = {
   },
 };
 
-const COLORS = { bg: '#000000', panel: '#1c1c1e', low: '#0e0e10', line: '#353538', white: '#ffffff', muted: '#98989f', green: '#30d158', soft: '#112c18', dim: '#55555b' };
-const SHADES = ['#2c2c2e', '#194b25', '#217c35', '#28a545', '#30d158'];
+const COLORS = { bg: '#000000', panel: '#1c1c1e', low: '#0e0e10', line: '#353538', white: '#ffffff', muted: '#98989f', dim: '#55555b' };
+
+// The accent the person picked in the app (state.accent: a preset, or 'custom' with state.accentCustom),
+// so a purple interface gets a purple card. The presets are a copy of ACCENTS in frontend/src/lib/format.js
+// (the API image cannot import the frontend); api/test/telegram-card-accent.test.js keeps the two equal.
+export const ACCENTS = { lime: '#30d158', sky: '#0a84ff', orange: '#ff9f0a', violet: '#bf5af2', pink: '#ff375f', red: '#ff453a', teal: '#40c8e0', gold: '#ffd60a' };
+const DEFAULT_ACCENT = ACCENTS.lime;
+const HEX = /^#[0-9a-f]{6}$/i;
+const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+const toHex = parts => `#${parts.map(v => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('')}`;
+const mix = (from, to, t) => { const a = rgb(from), b = rgb(to); return toHex(a.map((v, i) => v + (b[i] - v) * t)); };
+const luminance = hex => { const [r, g, b] = rgb(hex).map(v => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+
+// The colour to draw: a known preset, or the person's own '#rrggbb', never anything else. A custom colour
+// too dark to show on the card's black is lifted towards white until it can be seen.
+export function cardAccent(state) {
+  const key = state?.accent;
+  if (typeof key === 'string' && Object.hasOwn(ACCENTS, key)) return ACCENTS[key];
+  if (key === 'custom' && typeof state?.accentCustom === 'string' && HEX.test(state.accentCustom.trim())) {
+    let hex = state.accentCustom.trim().toLowerCase();
+    for (let i = 0; i < 8 && luminance(hex) < 0.12; i++) hex = mix(hex, '#ffffff', 0.15);
+    return hex;
+  }
+  return DEFAULT_ACCENT;
+}
+
+// Everything on the card that was green: the logo, the record panel, the ticks, and the five shades the
+// body is filled with, from a neutral grey (not worked) up to the full accent.
+export function cardPalette(accent) {
+  const a = HEX.test(accent || '') ? accent.toLowerCase() : DEFAULT_ACCENT;
+  return {
+    accent: a,
+    soft: mix('#000000', a, 0.2),
+    ink: luminance(a) > 0.4 ? '#000000' : '#ffffff',
+    shades: ['#2c2c2e', mix('#000000', a, 0.32), mix('#000000', a, 0.55), mix('#000000', a, 0.78), a],
+  };
+}
 const INERT = new Set(['head', 'hair', 'neck', 'hands', 'feet', 'knees', 'ankles']);
 
 export const xmlEscape = value => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/g, ' ')
@@ -177,6 +213,7 @@ function fit(text, size, maxWidth, min = 34, factor = 0.6) {
 export function workoutCardSvg(model) {
   const L = LABELS[model.lang];
   const out = [];
+  const pal = cardPalette(model.accent);
   const rect = (x, y, w, h, fill, r = 0) => out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${fill}"/>`);
   // y is the top of the text box as in the design; the baseline sits 0.9 em below it.
   const text = (value, x, y, size, fill, bold = false, anchor = 'start') => out.push(
@@ -187,8 +224,8 @@ export function workoutCardSvg(model) {
   rect(0, 0, CARD_SIZE, CARD_SIZE, COLORS.bg);
 
   // Header: logo, name, date.
-  rect(64, 54, 48, 48, COLORS.green, 14);
-  out.push('<g stroke="#000" stroke-width="3" stroke-linecap="round" fill="none"><path d="M79 78H97M82 70V86M94 70V86M76 74V82M100 74V82"/></g>');
+  rect(64, 54, 48, 48, pal.accent, 14);
+  out.push(`<g stroke="${pal.ink}" stroke-width="3" stroke-linecap="round" fill="none"><path d="M79 78H97M82 70V86M94 70V86M76 74V82M100 74V82"/></g>`);
   text(L.brand, 128, 55, 30, COLORS.white, true);
   if (model.date) text(model.date, 1016, 62, 24, COLORS.muted, false, 'end');
 
@@ -209,7 +246,7 @@ export function workoutCardSvg(model) {
     const s = 302 / vh;
     out.push(`<g transform="translate(${(ox - vx * s).toFixed(2)} ${(352 - vy * s).toFixed(2)}) scale(${s.toFixed(5)})">`);
     for (const [muscle, paths] of Object.entries(view.p)) {
-      const fill = INERT.has(muscle) ? COLORS.line : SHADES[Math.min(4, Math.max(0, model.levels[muscle] | 0))];
+      const fill = INERT.has(muscle) ? COLORS.line : pal.shades[Math.min(4, Math.max(0, model.levels[muscle] | 0))];
       for (const d of paths) out.push(`<path d="${d}" fill="${fill}"/>`);
     }
     out.push('</g>');
@@ -238,22 +275,22 @@ export function workoutCardSvg(model) {
 
   // Record of this workout.
   if (model.record) {
-    rect(64, 775, 952, 136, COLORS.soft, 22);
-    out.push('<g stroke="#30d158" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M96 806H138V826Q138 844 117 848Q96 844 96 826ZM96 812H86V822Q88 830 96 832M138 812H148V822Q146 830 138 832M117 848V858M105 860H129"/></g>');
-    text(L.record, 160, 792, 23, COLORS.green, true);
+    rect(64, 775, 952, 136, pal.soft, 22);
+    out.push(`<g stroke="${pal.accent}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M96 806H138V826Q138 844 117 848Q96 844 96 826ZM96 812H86V822Q88 830 96 832M138 812H148V822Q146 830 138 832M117 848V858M105 860H129"/></g>`);
+    text(L.record, 160, 792, 23, pal.accent, true);
     text(model.record.text, 160, 820, 44, COLORS.white, true);
     const name = fit(model.record.name, 25, 830, 20, 0.56);
     text(name.text, 160, 876, name.size, COLORS.muted);
   }
 
   if (model.journal) {
-    out.push('<path d="M66 961L73 968L88 953" stroke="#30d158" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>');
+    out.push(`<path d="M66 961L73 968L88 953" stroke="${pal.accent}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`);
     text(L.journal(model.journal), 103, 938, 29, COLORS.white, true);
   }
 
   // Footer.
   rect(64, 998, 952, 1, COLORS.line);
-  out.push('<path d="M66 1031L73 1038L88 1023" stroke="#30d158" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>');
+  out.push(`<path d="M66 1031L73 1038L88 1023" stroke="${pal.accent}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`);
   text(L.saved, 98, 1016, 23, COLORS.muted);
   out.push('</svg>');
   return out.join('');
