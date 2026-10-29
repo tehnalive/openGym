@@ -424,6 +424,103 @@ paths:
         '403':
           description: Telegram notifications are unavailable for this account or server.
 
+  /api/shares:
+    post:
+      tags: [data]
+      operationId: createShare
+      summary: Share a training plan by link
+      description: |
+        Stores a plan bundle (`buildPlanBundle` in the app) and returns a Telegram Mini App link
+        `https://t.me/<bot>/<app>?startapp=p_<id>` (`TELEGRAM_BOT_USERNAME`,
+        `TELEGRAM_MINI_APP_SHORT_NAME`; an empty short name gives the bot's main Mini App link).
+        Only the shape is checked here (`opengym_plan: 1`, at least one routine with one exercise,
+        at most 50 routines, 600 exercises and 200 KB); the recipient's app runs the full parser.
+        Anyone signed in who holds the id can read the plan. A link does not expire unless the
+        operator sets `SHARE_TTL_DAYS`; the author can still revoke it (`DELETE`). Sending the
+        same plan again returns the existing link. At most `SHARE_MAX_PER_USER` (default 100)
+        links per profile and 10 new ones an hour.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundle]
+              properties:
+                bundle: { type: object, description: 'A plan file: `opengym_plan`, `name`, `unit`, `week`, `routines`, `customEx`.' }
+      responses:
+        '200':
+          description: The link was created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+                  link: { type: string }
+                  created: { type: string, format: date-time }
+                  expires: { type: string, format: date-time, nullable: true, description: 'Null when links do not expire.' }
+        '400':
+          description: 'Not a plan, empty or too large (`code: share-invalid`).'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: 'The profile already has the maximum number of live links (`code: share-limit`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/shares/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The id after `p_` in the link.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getShare
+      summary: Read a shared plan
+      description: |
+        The plan and who sent it, for any signed-in profile. The author is the display name only,
+        never a Telegram id. `opens` (how many times someone else read it) is given to the author
+        only. A revoked, expired or unknown id is the same `404` with `code: share-gone`.
+      responses:
+        '200':
+          description: The shared plan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  author: { type: string }
+                  created: { type: string, format: date-time }
+                  expires: { type: string, format: date-time, nullable: true }
+                  mine: { type: boolean }
+                  opens: { type: integer, description: 'Only when `mine` is true.' }
+                  bundle: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Revoked, expired or unknown (`code: share-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [data]
+      operationId: revokeShare
+      summary: Revoke a shared plan
+      description: Deletes the stored plan; the link stops working at once. Only the author can.
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: The caller is not the author.
+        '404':
+          description: 'Already revoked, expired or unknown (`code: share-gone`).'
+
   /api/register/options:
     post:
       tags: [auth]

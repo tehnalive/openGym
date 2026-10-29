@@ -26,6 +26,7 @@ import {
   normalizeEmail, maskEmail
 } from './password.js';
 import { createBackoff, createWindow } from './rate-limit.js';
+import { SHARE_ID_RE, newShareId, checkBundle, authorName, shareLink, shareExpired } from './shares.js';
 import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS,
   transportsOf,
@@ -184,6 +185,7 @@ db.users = db.users || [];
 db.creds = db.creds || [];
 db.subs = db.subs || [];
 db.invites = db.invites || [];
+db.shares = db.shares || [];             // shared training plans (shares.js), at most SHARE_MAX_PER_USER a profile
 db.deviceLinks = db.deviceLinks || [];   // unused one-time device links, hashed (device-link.js)
 const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(user.id));
 // One owner per instance, any number of admins. Admins run the place day to day (users, invites,
@@ -1503,6 +1505,7 @@ function removeAccount(u) {
   db.creds = (db.creds || []).filter(c => c.userId !== u.id);
   db.subs = (db.subs || []).filter(x => x.userId !== u.id);
   dropDeviceLinks(db, u.id);
+  db.shares = (db.shares || []).filter(x => x.userId !== u.id);
   presence.delete(u.id);
   // The training history and any Coach credential of theirs, both outside db.json.
   try { fs.unlinkSync(stateFile(u.id)); } catch { /* already gone */ }
@@ -2094,6 +2097,31 @@ setInterval(() => {
 }, 600000).unref();
 // Every one of these makes the server send pushes, one per subscription of the account. A
 // person taps "send test" a few times and starts a rest after each set; a loop does neither.
+// Shared plans (TG19). The link is public to anyone who holds it, so it lives for SHARE_TTL_DAYS and
+// the author can pull it earlier; creating is budgeted per profile, reading per profile too.
+const intEnv = (name, def, min, max) => { const n = parseInt(process.env[name] || '', 10); return n >= min && n <= max ? n : def; };
+// 0 (the default) means a link never expires: what someone sent a friend keeps opening.
+const SHARE_TTL_DAYS = intEnv('SHARE_TTL_DAYS', 0, 0, 3650);
+const SHARE_MAX_PER_USER = intEnv('SHARE_MAX_PER_USER', 100, 1, 1000);
+const SHARE_BOT = /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(process.env.TELEGRAM_BOT_USERNAME || '') ? process.env.TELEGRAM_BOT_USERNAME : 'Gym_statsbot';
+// Empty on purpose means the bot's main Mini App (t.me/<bot>?startapp=...).
+const SHARE_APP = process.env.TELEGRAM_MINI_APP_SHORT_NAME === undefined ? 'app'
+  : /^([A-Za-z][A-Za-z0-9_]{2,31})?$/.test(process.env.TELEGRAM_MINI_APP_SHORT_NAME) ? process.env.TELEGRAM_MINI_APP_SHORT_NAME : 'app';
+const SHARE_CREATES = createWindow({ max: 10, windowMs: 3600000 });
+const SHARE_READS = createWindow({ max: 120, windowMs: 60000 });
+setInterval(() => { SHARE_CREATES.sweep(); SHARE_READS.sweep(); }, 600000).unref();
+// The open counter is a statistic: it is written lazily so a read never costs a db.json rewrite.
+let shareSaveTimer = null;
+function saveSharesSoon() {
+  if (shareSaveTimer) return;
+  shareSaveTimer = setTimeout(() => { shareSaveTimer = null; try { saveDb(); } catch (e) { console.error('db save failed', e.message); } }, 30000);
+  shareSaveTimer.unref();
+}
+function dropExpiredShares() {
+  const before = db.shares.length;
+  db.shares = db.shares.filter(x => !shareExpired(x));
+  return db.shares.length !== before;
+}
 const PUSH_TESTS = createWindow({ max: 10, windowMs: 600000 });
 const REST_TIMER_SETS = createWindow({ max: 60, windowMs: 60000 });
 setInterval(() => { PUSH_TESTS.sweep(); REST_TIMER_SETS.sweep(); }, 600000).unref();
@@ -2288,6 +2316,62 @@ const routes = {
     const { user } = s;
     const renew = s.bearer && s.kind !== 'c' && s.exp - Date.now() < SESSION_DAYS * 86400000 / 2;
     json(res, 200, { user: publicUser(user), ...(renew ? { token: makeSession(user) } : {}) });
+  },
+
+  // A training plan to hand to a friend. Whoever holds the id reads the plan, so GET needs a
+  // session but no ownership; the author's Telegram id is never part of any answer.
+  'POST /api/shares': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
+    const wait = SHARE_CREATES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const body = await readBody(req);
+    if (readSession(req) !== user || !stateIdentityMatches(req, res, user)) return;
+    const bundle = checkBundle(body.bundle);
+    if (typeof bundle === 'string') return json(res, 400, { error: bundle, code: 'share-invalid' });
+    dropExpiredShares();
+    // The same plan sent again is the same link, so repeated sharing does not pile records up.
+    const text = JSON.stringify(bundle);
+    const same = db.shares.find(x => x.userId === user.id && JSON.stringify(x.bundle) === text);
+    if (same) return json(res, 200, { id: same.id, link: shareLink(same.id, SHARE_BOT, SHARE_APP), created: same.created, expires: same.expires || null });
+    if (db.shares.filter(x => x.userId === user.id).length >= SHARE_MAX_PER_USER) {
+      return json(res, 409, { error: 'too many shared plans, revoke one first', code: 'share-limit', limit: SHARE_MAX_PER_USER });
+    }
+    let id;
+    do { id = newShareId(); } while (db.shares.some(x => x.id === id));
+    const now = Date.now();
+    const share = { id, userId: user.id, author: authorName(user), created: new Date(now).toISOString(),
+      expires: SHARE_TTL_DAYS ? new Date(now + SHARE_TTL_DAYS * 86400000).toISOString() : null, opens: 0, bundle };
+    db.shares.push(share);
+    try { saveDb(); } catch (error) { db.shares.pop(); throw error; }
+    audit(req, 'share.create', { user });
+    json(res, 200, { id, link: shareLink(id, SHARE_BOT, SHARE_APP), created: share.created, expires: share.expires });
+  },
+  'GET /api/shares/{id}': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
+    const wait = SHARE_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const share = SHARE_ID_RE.test(req.shareId || '') ? db.shares.find(x => x.id === req.shareId) : null;
+    if (!share || shareExpired(share)) return json(res, 404, { error: 'this link was revoked or has expired', code: 'share-gone' });
+    const mine = share.userId === user.id;
+    if (!mine) { share.opens = (share.opens || 0) + 1; saveSharesSoon(); }
+    json(res, 200, { id: share.id, author: share.author, created: share.created, expires: share.expires || null, mine,
+      ...(mine ? { opens: share.opens || 0 } : {}), bundle: share.bundle });
+  },
+  'DELETE /api/shares/{id}': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!stateIdentityMatches(req, res, user)) return;
+    const index = SHARE_ID_RE.test(req.shareId || '') ? db.shares.findIndex(x => x.id === req.shareId) : -1;
+    if (index < 0) return json(res, 404, { error: 'this link was revoked or has expired', code: 'share-gone' });
+    if (db.shares[index].userId !== user.id) return json(res, 403, { error: 'only the author can revoke a link' });
+    const [removed] = db.shares.splice(index, 1);
+    try { saveDb(); } catch (error) { db.shares.splice(index, 0, removed); throw error; }
+    audit(req, 'share.revoke', { user });
+    json(res, 200, { ok: true });
   },
 
   // Preferences are stored on the Telegram-bound account, never on a caller-supplied chat id.
@@ -3226,6 +3310,8 @@ const server = http.createServer(async (req, res) => {
   // above stays a plain lookup, and so csrfOk and the catch-all see one name for every file.
   const mm = /^\/api\/media\/([0-9a-f]{64})$/.exec(url.pathname);
   if (mm) { key = req.method + ' /api/media/{hash}'; req.mediaHash = mm[1]; }
+  const sm = /^\/api\/shares\/([^/]+)$/.exec(url.pathname);
+  if (sm) { key = req.method + ' /api/shares/{id}'; req.shareId = sm[1]; }
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: 'not found' });
   if (TELEGRAM_ONLY && TELEGRAM_ONLY_REFUSED.has(key)) return json(res, 403, { error: 'sign-in is only through Telegram', code: 'telegram-only' });

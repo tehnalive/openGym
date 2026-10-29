@@ -357,7 +357,7 @@ describe('Plan — Schedule extras', () => {
     mount()
     click(byLabel('Plan options'))
     const items = menuSheet.mock.calls.at(-1)[0].items.filter(Boolean)
-    expect(items.map(i => i.label)).toEqual(['Export plan file', 'Print / Save as PDF', 'Import a plan file', 'Load starter plan'])
+    expect(items.map(i => i.label)).toEqual(['Export plan file', 'Поделиться в Telegram', 'Print / Save as PDF', 'Import a plan file', 'Load starter plan'])
   })
 })
 

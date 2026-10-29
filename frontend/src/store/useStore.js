@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api, setRemoteAuth } from '../lib/api.js'
 import { isTelegramLaunch, loadTelegram, prepareTelegram, telegramError } from '../lib/telegram.js'
+import { capturePendingShare } from '../lib/plan-link.js'
 import { localTZ } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
 import { registerCustom, healCustomEx } from '../lib/exercises.js'
@@ -2032,6 +2033,8 @@ export const useStore = create((set, get) => {
           await Promise.allSettled([pushing, pulling].filter(Boolean))
           const sdk = await loadTelegram()
           telegramCleanup?.(); telegramCleanup = prepareTelegram(sdk)
+          // A link to a friend's plan (startapp=p_<id>): remembered here, shown once signed in.
+          capturePendingShare(sdk)
           const cfg = await get().loadConfig()
           if (cfg?.telegram_login === false) throw Object.assign(new Error('disabled'), { status: 503 })
           const res = await api('/api/telegram/login', { method: 'POST', body: JSON.stringify({ initData: sdk.initData }) })
