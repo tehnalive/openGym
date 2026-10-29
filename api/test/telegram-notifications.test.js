@@ -46,7 +46,7 @@ test('workout message is Russian with correct declensions', () => {
   assert.match(text, /Тренировка записана/);
   assert.match(text, /2 упражнения · 3 рабочих подхода/);
   assert.match(text, /Тоннаж: 4\s?200 кг/);
-  assert.match(text, /Группы мышц: грудь, плечи, трицепс/);
+  assert.match(text, /Группы мышц: грудь, трицепс, плечи/);
   assert.doesNotMatch(text, /Workout|Volume|sets/);
   const one = workoutNotificationText({ entries: [{ sets: [{ done: true, w: 1, r: 1 }] }] }, {}, 'ru');
   assert.match(one, /1 упражнение · 1 рабочий подход/);
