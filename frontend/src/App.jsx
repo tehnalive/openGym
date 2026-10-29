@@ -44,6 +44,7 @@ import { useAnimPacksBoot } from './components/Animations.jsx'
 import Login from './views/Login.jsx'
 import MobileOnboarding from './views/MobileOnboarding.jsx'
 import PermissionSteps from './views/PermissionSteps.jsx'
+import SharedPlanGate from './components/SharedPlan.jsx'
 import FirstRunOnboarding, { needsFirstRunOnboarding as needsFirstRun } from './views/FirstRunOnboarding.jsx'
 import Home from './views/Home.jsx'
 import Plan from './views/Plan.jsx'
@@ -335,6 +336,8 @@ function Shell() {
           would ride along with the page for the length of it. Decides for itself when to show —
           including on the sign-in screen, when the server has just ended the session. */}
       <SyncBanner />
+      {/* A plan a friend sent as a link: its preview opens once the app is past sign-in and first-run setup. */}
+      <SharedPlanGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />
       {!noTabs && <TabBar onStart={startFlow} />}
       <RestTimer />
       <Modals />

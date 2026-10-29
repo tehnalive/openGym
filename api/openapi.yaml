@@ -498,7 +498,7 @@ paths:
                   bundle: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: Revoked, expired or unknown (`code: share-gone`).
+          description: 'Revoked, expired or unknown (`code: share-gone`).'
         '429': { $ref: '#/components/responses/TooManyRequests' }
     delete:
       tags: [data]
@@ -518,7 +518,7 @@ paths:
         '403':
           description: The caller is not the author.
         '404':
-          description: Already revoked, expired or unknown (`code: share-gone`).
+          description: 'Already revoked, expired or unknown (`code: share-gone`).'
 
   /api/register/options:
     post:
