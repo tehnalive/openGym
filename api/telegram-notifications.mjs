@@ -32,15 +32,50 @@ const completedUnits = set => isSideSet(set)
   : Number(set?.done === true);
 const cleanText = (value, max = 80) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 const localized = lang => String(lang || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+
+// Language of bot messages. Order: a language the user picked in the app (en/ru), then the
+// language_code from the last signed Telegram initData, then Russian (this service's default).
+// The profile's default 'en' (langAuto) is not a choice and must not win over Telegram.
+export function notificationLang(user, state) {
+  const picked = typeof state?.lang === 'string' ? state.lang.toLowerCase() : '';
+  if (state?.langAuto !== true && (picked === 'ru' || picked.startsWith('ru-') || picked === 'en' || picked.startsWith('en-'))) return localized(picked);
+  const tg = typeof user?.telegramLang === 'string' ? user.telegramLang : '';
+  return tg ? localized(tg) : 'ru';
+}
+
+// Only the bare language subtag of a verified Telegram language_code is stored.
+export function telegramLangCode(value) {
+  const code = typeof value === 'string' ? value.toLowerCase().split(/[-_]/)[0] : '';
+  return /^[a-z]{2,3}$/.test(code) ? code : '';
+}
+
+// 1 подход, 2 подхода, 5 подходов, 11 подходов, 21 подход
+export function ruPlural(n, one, few, many) {
+  const abs = Math.abs(Math.trunc(n));
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+const enPlural = (n, one, many) => (n === 1 ? one : many);
+const COUNT = {
+  sets: { ru: n => `${n} ${ruPlural(n, 'рабочий подход', 'рабочих подхода', 'рабочих подходов')}`, en: n => `${n} ${enPlural(n, 'working set', 'working sets')}` },
+  exercises: { ru: n => `${n} ${ruPlural(n, 'упражнение', 'упражнения', 'упражнений')}`, en: n => `${n} ${enPlural(n, 'exercise', 'exercises')}` },
+  workouts: { ru: n => `${n} ${ruPlural(n, 'тренировка', 'тренировки', 'тренировок')}`, en: n => `${n} ${enPlural(n, 'workout', 'workouts')}` },
+};
+export const countText = (kind, n, lang) => COUNT[kind][lang === 'ru' ? 'ru' : 'en'](n);
 const fmt = (number, lang) => new Intl.NumberFormat(lang === 'ru' ? 'ru-RU' : 'en-US', { maximumFractionDigits: 0 }).format(Math.round(number));
 
 export function statsForWorkout(workout) {
   const entries = Array.isArray(workout?.entries) ? workout.entries.filter(isObject) : [];
   let sets = 0;
   let volume = 0;
+  let exercises = 0;
   const muscles = {};
   for (const entry of entries) {
     const rows = Array.isArray(entry.sets) ? entry.sets : [];
+    const before = sets;
     const weights = entry.muscleSnapshot?.muscleWeights;
     for (const set of rows) {
       if (!isObject(set) || isWarmup(set)) continue;
@@ -53,9 +88,10 @@ export function statsForWorkout(workout) {
         if (n > 0 && Number.isFinite(n)) muscles[muscle] = (muscles[muscle] || 0) + units * n;
       }
     }
+    if (sets > before) exercises += 1;
   }
   if (Number.isFinite(workout?.vol) && workout.vol >= 0) volume = workout.vol;
-  return { sets, volume, muscles };
+  return { sets, volume, exercises, muscles };
 }
 
 function topMuscles(scores, lang, count = 4) {
@@ -73,8 +109,8 @@ function volumeLine(volume, unit, lang) {
   return lang === 'ru' ? `Тоннаж: ${fmt(volume, lang)} ${unitName}` : `Volume: ${fmt(volume, lang)} ${unitName}`;
 }
 
-export function workoutNotificationText(workout, state) {
-  const lang = localized(state?.lang);
+export function workoutNotificationText(workout, state, langOverride) {
+  const lang = langOverride ? localized(langOverride) : localized(state?.lang);
   const stats = statsForWorkout(workout);
   const muscleList = topMuscles(stats.muscles, lang, 3);
   const title = cleanText(workout?.name, 80);
@@ -82,13 +118,14 @@ export function workoutNotificationText(workout, state) {
   if (lang === 'ru') return [
     '✅ Тренировка записана',
     title ? `«${title}»` : null,
-    `Рабочих подходов: ${stats.sets}`,
+    `${countText('exercises', stats.exercises, lang)} · ${countText('sets', stats.sets, lang)}`,
     volume,
     muscleList.length ? `Группы мышц: ${muscleList.join(', ')}` : null,
     'Отличная работа — продолжай в своём темпе 💪',
   ].filter(Boolean).join('\n');
   return [
-    '✅ Workout saved', title || null, `Working sets: ${stats.sets}`, volume,
+    '✅ Workout saved', title || null,
+    `${countText('exercises', stats.exercises, lang)} · ${countText('sets', stats.sets, lang)}`, volume,
     muscleList.length ? `Muscle groups: ${muscleList.join(', ')}` : null,
     'Great work — keep building at your own pace 💪',
   ].filter(Boolean).join('\n');
@@ -113,8 +150,8 @@ export function previousWeekRange(currentMonday) {
   return { from: shiftDate(currentMonday, -7), to: shiftDate(currentMonday, -1) };
 }
 
-export function weeklySummaryText(workouts, state, range) {
-  const lang = localized(state?.lang);
+export function weeklySummaryText(workouts, state, range, langOverride) {
+  const lang = langOverride ? localized(langOverride) : localized(state?.lang);
   const list = Array.isArray(workouts) ? workouts.filter(isObject) : [];
   if (!list.length) return null;
   let sets = 0;
@@ -131,14 +168,14 @@ export function weeklySummaryText(workouts, state, range) {
   if (lang === 'ru') return [
     '📊 Итоги прошлой недели',
     `${range.from} — ${range.to}`,
-    `Тренировок: ${list.length} · рабочих подходов: ${sets}`,
+    `${countText('workouts', list.length, lang)} · ${countText('sets', sets, lang)}`,
     volumeText,
     muscleList.length ? `Группы мышц: ${muscleList.join(', ')}` : null,
     list.length >= 3 ? 'Отличный ритм — ты стабильно двигаешься к цели 🔥' : 'Каждая тренировка засчитывается. Хорошая работа 💪',
   ].filter(Boolean).join('\n');
   return [
     '📊 Last week’s training', `${range.from} — ${range.to}`,
-    `Workouts: ${list.length} · working sets: ${sets}`, volumeText,
+    `${countText('workouts', list.length, lang)} · ${countText('sets', sets, lang)}`, volumeText,
     muscleList.length ? `Most trained: ${muscleList.join(', ')}` : null,
     list.length >= 3 ? 'Great rhythm — you’re making steady progress 🔥' : 'Every workout counts. Nice work 💪',
   ].filter(Boolean).join('\n');

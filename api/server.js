@@ -39,7 +39,7 @@ import { atomicWrite as durableWrite } from './durable.js';
 import { excusedOn, nudgeFor, nudgeWindowOpen, toneOf } from './nudge.js';
 import { validateTelegramInitData, TelegramAuthError, telegramPhotoUrl } from './telegram-auth.mjs';
 import {
-  notificationState, previousWeekRange, publicNotificationPreferences, statsForWorkout,
+  notificationLang, notificationState, previousWeekRange, telegramLangCode, publicNotificationPreferences, statsForWorkout,
   validNotificationPreferences, weekStart, weeklySummaryText, workoutNotificationText,
 } from './telegram-notifications.mjs';
 
@@ -616,7 +616,7 @@ function maybeNotifyNewWorkout(user, previous, next) {
   state.attemptedWorkoutIds = [...state.attemptedWorkoutIds, ...ids].slice(-500);
   try { saveDb(); } catch { console.error('telegram notification checkpoint could not be saved'); return; }
   const latest = added[0].workout;
-  void sendTelegramNotification(user.telegramId, workoutNotificationText(latest, next));
+  void sendTelegramNotification(user.telegramId, workoutNotificationText(latest, next, notificationLang(user, next)));
 }
 
 function telegramWeeklyTick() {
@@ -639,7 +639,7 @@ function telegramWeeklyTick() {
         && workout.d >= range.from && workout.d <= range.to);
       checkpoint.lastWeeklySummaryKey = thisWeek;
       saveDb();
-      const text = weeklySummaryText(workouts, S, range);
+      const text = weeklySummaryText(workouts, S, range, notificationLang(user, S));
       if (text) void sendTelegramNotification(user.telegramId, text);
     } catch {
       console.error('telegram weekly summary skipped for an unreadable profile');
@@ -2335,7 +2335,8 @@ const routes = {
       return json(res, 401, { error: 'Telegram authentication failed', code: 'telegram-auth' });
     }
     const telegramId = String(identity.user.id);
-    const telegramProfile = { telegramUsername: identity.user.username || '', telegramPhotoUrl: identity.user.photo_url || '' };
+    const telegramProfile = { telegramUsername: identity.user.username || '', telegramPhotoUrl: identity.user.photo_url || '',
+      telegramLang: telegramLangCode(identity.user.language_code) };
     if (telegramAllowlist.ids.size && !telegramAllowlist.ids.has(telegramId)) {
       auditFail(req, 'auth.telegram.denied', { ok: false, msg: 'not-allowed' });
       return json(res, 403, { error: 'Telegram account is not allowed', code: 'telegram-forbidden' });
@@ -2371,8 +2372,11 @@ const routes = {
       audit(req, 'auth.telegram.register', { user });
     }
     // Refresh only this signed identity's metadata; names never grant/link accounts or roles.
-    if (user.telegramUsername !== telegramProfile.telegramUsername || user.telegramPhotoUrl !== telegramProfile.telegramPhotoUrl) {
-      const previous = { telegramUsername: user.telegramUsername, telegramPhotoUrl: user.telegramPhotoUrl };
+    if (user.telegramUsername !== telegramProfile.telegramUsername || user.telegramPhotoUrl !== telegramProfile.telegramPhotoUrl
+      || (telegramProfile.telegramLang && user.telegramLang !== telegramProfile.telegramLang)) {
+      // A missing language_code keeps the last known one instead of erasing it.
+      if (!telegramProfile.telegramLang) delete telegramProfile.telegramLang;
+      const previous = { telegramUsername: user.telegramUsername, telegramPhotoUrl: user.telegramPhotoUrl, telegramLang: user.telegramLang };
       Object.assign(user, telegramProfile);
       try { saveDb(); } catch (error) { Object.assign(user, previous); throw error; }
     }
