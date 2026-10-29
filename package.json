@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "fork:check": "node scripts/fork-check.mjs"
+  },
   "devDependencies": {
     "js-yaml": "^4.1.0"
   }

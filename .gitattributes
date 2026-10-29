@@ -1,0 +1,32 @@
+# Line endings: LF in the repository and in working copies, on every OS.
+# CRLF in commits once turned merge conflicts into "the whole file".
+* text=auto eol=lf
+
+# Windows batch files keep their CRLF as committed.
+*.bat -text
+*.cmd -text
+
+# Binary files: never touched by line-ending conversion.
+*.webp binary
+*.mp4 binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.jar binary
+*.keystore binary
+*.zip binary
+*.gz binary
+*.mp3 binary
+*.wav binary
+*.m4a binary
+*.mov binary
+*.usdz binary
+*.car binary
