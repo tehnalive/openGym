@@ -183,16 +183,16 @@ export function reset() { cache = null; keyCache = null; }
 /* ---------- what one provider owns ----------
    The only way the rest of the code reads the per-provider maps, so the shape stays here. */
 export const authFor = (cfg = load(), p = cfg.provider) => (cfg.auth && cfg.auth[p]) || null;
-// OpenCode's model is the operator's: OPENCODE_MODEL in the server environment wins over
+// OpenRouter's model is the operator's: OPENROUTER_MODEL in the server environment wins over
 // anything stored, so the free model can be swapped (or replaced by a paid one) without opening
 // the admin card, and a model name typed there cannot silently override a paid-model decision.
 export const modelFor = (cfg = load(), p = cfg.provider) => {
-  const env = p === 'opencode' ? (process.env.OPENCODE_MODEL || '').trim() : '';
+  const env = p === 'openrouter' ? (process.env.OPENROUTER_MODEL || '').trim() : '';
   return env || (cfg.models && cfg.models[p]) || (PROVIDERS[p] && PROVIDERS[p].defaultModel) || null;
 };
 /* The operator's ceilings on the daily caps, from the environment. The admin card may lower a cap
-   but not raise it past these, and a stored 0 ("unlimited") still ends at the ceiling. A paid model
-   spends the operator's balance, so the instance counts as well as the profile. */
+   but not raise it past these, and a stored 0 ("unlimited") still ends at the ceiling. OpenRouter's
+   free models allow about 50 requests a day per account, so the instance has to count too. */
 const ceiling = name => { const n = Math.floor(+process.env[name]); return n > 0 ? n : 0; };
 export function effectiveCaps(cfg = load()) {
   const stored = cfg.caps || {};

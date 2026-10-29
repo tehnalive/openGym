@@ -13,16 +13,12 @@ const ru = lang => /^ru\b/i.test(String(lang || ''));
    the provider's status; the words never include the provider's own message. */
 const FAILURES = {
   ratelimit: {
-    ru: 'Нейросеть сейчас перегружена или лимит запросов исчерпан. Попробуйте через несколько минут; если не помогает, повторите позже.',
-    en: 'The AI model is busy or its request limit is used up. Try again in a few minutes; if it keeps failing, try later.'
-  },
-  freeonly: {
-    ru: 'Бесплатная нейросеть недоступна для Тренера на этом сервере. Владельцу сервера нужно выбрать платную модель OpenCode.',
-    en: 'The free AI model is not available to the Coach on this server. The server owner needs to pick a paid OpenCode model.'
+    ru: 'Бесплатная нейросеть сейчас перегружена или лимит запросов исчерпан. Попробуйте через несколько минут; если не помогает, лимит закончился на сегодня, повторите завтра.',
+    en: 'The free AI model is busy or its request limit is used up. Try again in a few minutes; if it keeps failing, the limit is spent for today.'
   },
   quota: {
-    ru: 'У сервиса нейросети закончились средства на счёте. Владельцу сервера нужно проверить аккаунт OpenCode.',
-    en: 'The AI service account is out of credit. The server owner needs to check the OpenCode account.'
+    ru: 'У сервиса нейросети закончились средства на счёте. Владельцу сервера нужно проверить аккаунт OpenRouter.',
+    en: 'The AI service account is out of credit. The server owner needs to check the OpenRouter account.'
   },
   modelgone: {
     ru: 'Выбранная нейросеть недоступна. Владельцу сервера нужно выбрать другую модель.',
@@ -37,53 +33,35 @@ export function classifyProviderFailure(detail) {
   const status = /^(\d{3})\b/.exec(String(detail || '').trim());
   if (!status) return null;
   const n = +status[1];
-  // The gateway answers 429 FreeUsageLimitError ("Free models work in OpenCode") to a free model
-  // called from anywhere else; waiting would not help, another model would.
-  if (n === 429 && /free usage limit|free models work in opencode/i.test(detail)) return 'freeonly';
   if (n === 429) return 'ratelimit';
-  if ((n === 401 || n === 403) && /insufficient (balance|credit)|no (credits?|balance)|out of credit/i.test(detail)) return 'quota';
   if (n === 402) return 'quota';
   if (n === 404 || (n === 400 && /\bmodel\b.*(not available|not a valid|unknown|invalid)/i.test(detail))) return 'modelgone';
   return null;
 }
 
-/* The consent notice shown beside the provider's name. Honest about who receives the data and what
-   the gateway's documentation (opencode.ai/docs/zen, privacy section, 2026-10-30) says about the
-   chosen model: most models are zero-retention and not trained on, a few free ones are not. */
-const TRAINS = /^(big-pickle|flint-40b-free|mimo-v2\.6-flash-free)$/;
-const LOGGED = /^nemotron-.*-free$/;
-const KEPT_30 = /^(beam-free|claude-.*|gpt-.*)$/;
-export function retentionOf(model) {
-  const m = String(model || '');
-  if (TRAINS.test(m)) return 'training';
-  if (LOGGED.test(m)) return 'logged';
-  if (KEPT_30.test(m)) return 'kept30';
-  return 'zero';
-}
-const NOTICE = {
-  ru: {
-    head: (name) => `Данные тренировок уходят на сервис OpenCode (opencode.ai), а оттуда в нейросеть: ${name}.`,
-    training: 'По документации OpenCode, эта бесплатная модель может использовать ваши запросы для улучшения модели.',
-    logged: 'По документации OpenCode, запросы к этой бесплатной модели записываются для безопасности и улучшения продукта.',
-    kept30: 'По документации OpenCode, запросы к этой модели хранятся 30 дней.',
-    zero: 'По документации OpenCode, провайдер этой модели не хранит запросы и не обучается на них; это условие провайдера, мы его проверить не можем.',
-    free: 'Бесплатный период ограничен по времени.',
-    tail: 'Не пишите Тренеру ничего, чем не готовы поделиться. Имя в Telegram и ваш идентификатор не отправляются.'
-  },
-  en: {
-    head: (name) => `Your training data goes to OpenCode (opencode.ai) and from there to the model ${name}.`,
-    training: 'According to OpenCode\'s documentation, this free model may use your requests to improve the model.',
-    logged: 'According to OpenCode\'s documentation, requests to this free model are logged for security and product improvement.',
-    kept30: 'According to OpenCode\'s documentation, requests to this model are kept for 30 days.',
-    zero: 'According to OpenCode\'s documentation, this model\'s provider keeps no requests and does not train on them; that is the provider\'s promise and cannot be checked from here.',
-    free: 'The free period is limited in time.',
-    tail: 'Do not tell the Coach anything you are not happy to share. Your Telegram name and id are not sent.'
-  }
-};
+/* The consent notice shown beside the provider's name. Honest about who receives the data and, on
+   a free model, that the model's operator may log it and learn from it. */
 export function providerNotice(provider, model) {
-  if (provider !== 'opencode') return null;
+  if (provider !== 'openrouter') return null;
+  return { ru: noticeIn('ru', model), en: noticeIn('en', model) };
+}
+function noticeIn(lang, model) {
+  const free = /:free$/.test(String(model || '')) || /^openrouter\/free$/.test(String(model || ''));
   const name = model ? String(model).slice(0, 80) : 'AI';
-  const free = /-free$/.test(String(model || ''));
-  const mk = L => [NOTICE[L].head(name), NOTICE[L][retentionOf(model)], ...(free ? [NOTICE[L].free] : []), NOTICE[L].tail].join(' ');
-  return { ru: mk('ru'), en: mk('en') };
+  if (lang === 'ru') {
+    return [
+      `Данные тренировок уходят на сервис OpenRouter (openrouter.ai), а оттуда в нейросеть: ${name}.`,
+      free
+        ? 'Это бесплатная модель: её владелец может сохранять ваши запросы и использовать их для обучения. Не пишите Тренеру ничего, чем не готовы поделиться.'
+        : 'Это платная модель; у неё свои правила хранения запросов. Не пишите Тренеру ничего, чем не готовы поделиться.',
+      'Имя в Telegram и ваш идентификатор не отправляются.'
+    ].join(' ');
+  }
+  return [
+    `Your training data goes to OpenRouter (openrouter.ai) and from there to the model ${name}.`,
+    free
+      ? 'This is a free model: its operator may keep your requests and use them for training. Do not tell the Coach anything you are not happy to share.'
+      : 'This is a paid model with its own retention rules. Do not tell the Coach anything you are not happy to share.',
+    'Your Telegram name and id are not sent.'
+  ].join(' ');
 }

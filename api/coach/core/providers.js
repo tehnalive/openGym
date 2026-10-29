@@ -43,17 +43,16 @@ export const HTTP_PROVIDERS = Object.freeze({
     defaultModel: null,
     keyPlaceholder: '(optional)'
   }),
-  // The Telegram build's provider (OpenCode Zen gateway). `serverOnly`: the key lives in the
-  // server's environment (OPENCODE_API_KEY) and nowhere else, so a phone with its own key never
-  // offers it and the admin card has no key field for it. The model comes from OPENCODE_MODEL and
-  // the address from OPENCODE_BASE_URL; defaultModel is the free DeepSeek id listed by
-  // opencode.ai/inference/v1/models on 2026-10-30 (docs/telegram/COACH.md).
-  opencode: Object.freeze({
-    label: 'OpenCode', runtime: 'HTTPS', http: true, serverOnly: true, envKey: true,
-    apiKeyEnv: 'OPENCODE_API_KEY', oauthEnv: null,
-    defaultBase: 'https://opencode.ai/inference',
-    defaultModel: 'deepseek-v4.1-flash-free',
-    keyPlaceholder: ''
+  // The Telegram build's provider. `serverOnly`: the key lives in the server's environment
+  // (OPENROUTER_API_KEY) and nowhere else, so a phone with its own key never offers it and the
+  // admin card has no key field for it. The model comes from OPENROUTER_MODEL; defaultModel is
+  // the free model checked against openrouter.ai/api/v1/models on 2026-10-30 (docs/telegram/COACH.md).
+  openrouter: Object.freeze({
+    label: 'OpenRouter', runtime: 'HTTPS', http: true, serverOnly: true, envKey: true,
+    apiKeyEnv: 'OPENROUTER_API_KEY', oauthEnv: null,
+    defaultBase: 'https://openrouter.ai/api/v1',
+    defaultModel: 'nvidia/nemotron-3.5-super-vl:free',
+    keyPlaceholder: 'sk-or-…'
   })
 });
 
