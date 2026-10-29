@@ -52,11 +52,22 @@ describe('boot watchdog', () => {
   it('says which script could not be loaded', () => {
     const s = document.createElement('script')
     s.type = 'text/plain'   // happy-dom would try to fetch it otherwise; the event is the same
-    s.src = 'https://gym.test/assets/index-B93PyrcZ.js'
+    s.src = location.origin + '/assets/index-B93PyrcZ.js'
     document.body.appendChild(s)
     s.dispatchEvent(new Event('error'))
     expect(boot().className).toBe('fail')
-    expect(boot().querySelector('code').textContent).toContain('Could not load https://gym.test/assets/index-B93PyrcZ.js')
+    expect(boot().querySelector('code').textContent).toContain('Could not load ' + location.origin + '/assets/index-B93PyrcZ.js')
+  })
+
+  // Fork: Cloudflare injects an analytics beacon that the Content-Security-Policy refuses, and that
+  // used to put the "could not start" screen up for a moment on every launch.
+  it('ignores a script from another origin that failed to load (a blocked analytics beacon)', () => {
+    const s = document.createElement('script')
+    s.type = 'text/plain'
+    s.src = 'https://static.cloudflareinsights.com/beacon.min.js'
+    document.body.appendChild(s)
+    s.dispatchEvent(new Event('error'))
+    expect(boot().className).not.toBe('fail')
   })
 
   it('ignores an image that failed to load, and an ordinary error until the 10 s are up', () => {
