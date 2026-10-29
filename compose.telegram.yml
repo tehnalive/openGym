@@ -22,6 +22,8 @@ services:
       COACH_DISABLED: 1
       # Personal media sync needs additional owner-bound transport checks before enabling.
       MEDIA_UPLOADS: 0
+      # Profiles come only from Telegram's signed launch data: no passkey, password or pairing routes.
+      TELEGRAM_ONLY: 1
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # An omitted value stays unset so public Telegram sign-up can be enabled deliberately.
       TELEGRAM_ALLOWED_IDS:

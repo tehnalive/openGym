@@ -78,6 +78,18 @@ const ALLOW_GUEST = !/^(0|false|no|off)$/i.test(process.env.ALLOW_GUEST || '');
 // every account that opts in, so an instance has to ask for it. While it is off every password
 // route answers 404 and the app shows none of it; hashes already stored stay where they are.
 const PASSWORD_LOGIN = /^(1|true|yes|on)$/i.test(process.env.PASSWORD_LOGIN || '');
+// A Telegram-only instance (the Mini App): a profile exists because Telegram signed for it, and
+// every other way in or out of one (passkeys, passwords, device links, paired-phone tokens) answers
+// 403 `telegram-only` before any handler runs. Off by default, so a plain openGym is unchanged.
+const TELEGRAM_ONLY = /^(1|true|yes|on)$/i.test(process.env.TELEGRAM_ONLY || '');
+const TELEGRAM_ONLY_REFUSED = new Set([
+  'POST /api/register/options', 'POST /api/register/verify', 'POST /api/register/password',
+  'POST /api/login/options', 'POST /api/login/verify', 'POST /api/login/password', 'POST /api/login/password-reset',
+  'POST /api/device-link/options', 'POST /api/device-link/verify',
+  'POST /api/pair/create', 'POST /api/pair/redeem',
+  'POST /api/account/passkeys/options', 'POST /api/account/passkeys/verify', 'POST /api/account/device-link',
+  'POST /api/account/password', 'POST /api/account/email'
+]);
 // Secret is read only from the server environment. A malformed allowlist disables this
 // entrance entirely instead of silently turning a private instance into open registration.
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -3216,6 +3228,7 @@ const server = http.createServer(async (req, res) => {
   if (mm) { key = req.method + ' /api/media/{hash}'; req.mediaHash = mm[1]; }
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: 'not found' });
+  if (TELEGRAM_ONLY && TELEGRAM_ONLY_REFUSED.has(key)) return json(res, 403, { error: 'sign-in is only through Telegram', code: 'telegram-only' });
   if (!csrfOk(req, key)) {
     // A Bearer that does not verify and no cookie beside it: nothing ambient is in play, the caller
     // is simply not signed in. That is the paired app once its token is revoked or expired, and it
