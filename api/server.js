@@ -3274,6 +3274,7 @@ const routes = {
 // A job that was running when the process died is not coming back; say so rather than leaving
 // a spinner that never resolves.
 coachJobs.recoverOnBoot();
+{ const p = coachConfig.freeProblem(); if (p) console.error('coach: switched off, ' + p); }
 // A ready proposal is the one Coach event worth a notification. Failures and "nothing to
 // change" stay silent on purpose (FR-38/E4).
 coachJobs.setProposalHook((uid, pending) => {

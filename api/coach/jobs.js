@@ -44,6 +44,7 @@ export const TIMEOUT_MS = Math.max(60000, +process.env.COACH_JOB_TIMEOUT_MS || 5
 const MAX_CONCURRENT = 2;          // these are minutes-scale jobs on often-single-core boxes
 const PENDING_DAYS = 14;           // FR-33
 const HISTORY_MAX = 20;
+const ASK_TOKENS_GUARDED = 4000;   // reasoning tokens count too, so this is not just the visible answer
 // A smaller ceiling on what one request may carry, for a free model with a request budget of its
 // own. Never above payload.js's MAX_PAYLOAD_CHARS; unset means that one.
 const maxPayloadChars = () => { const n = Math.floor(+process.env.COACH_MAX_PAYLOAD_CHARS); return n > 0 ? Math.min(n, payloadLib.MAX_PAYLOAD_CHARS) : payloadLib.MAX_PAYLOAD_CHARS; };
@@ -380,11 +381,14 @@ async function execute(job) {
     const ids = jobDir && unprivilegedIds();
     if (ids) shareJobDir(jobDir, ids);
 
+    // The topic guard (core/guard.js) is on for a provider that declares it; a chat answer there
+    // is also capped at ASK_TOKENS_GUARDED so a free model cannot ramble at the owner's expense.
+    const guard = !!cfgStore.providerMeta(cfg).guarded;
     const attempt = await runPipeline({
-      adapter, cfg, kind: job.kind, payload, model: cfgStore.modelFor(cfg), timeoutMs: TIMEOUT_MS,
+      adapter, cfg, kind: job.kind, payload, model: cfgStore.modelFor(cfg), timeoutMs: TIMEOUT_MS, guard,
       // The HTTP adapters take the fetch and the abort signal they are given; the runtime
       // adapters ignore both.
-      invokeOpts: { jobDir, env, fetch: fetchFor(TIMEOUT_MS), signal: ctl.signal, maxTokens: cfg.maxOutputTokens }
+      invokeOpts: { jobDir, env, fetch: fetchFor(TIMEOUT_MS), signal: ctl.signal, maxTokens: guard && job.kind === 'ask' ? Math.min(cfg.maxOutputTokens, ASK_TOKENS_GUARDED) : cfg.maxOutputTokens }
     });
     if (!attempt.ok) {
       // Cancelled by a forget, not failed by the provider: the log must not blame the job budget.

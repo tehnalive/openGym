@@ -12,7 +12,6 @@ import { canDropPrivileges, privilegeRefusal } from './adapters/spawn.js';
 import { DATA_CATEGORIES } from './core/payload.js';
 import { validateBaseUrl, validateHeaders, baseUrlFor } from './core/providers.js';
 import { providerNotice } from './messages.js';
-import { envBaseUrl } from './adapters/opencode.js';
 
 // Job failures the user sees, in the app's own voice. The raw provider detail never reaches
 // them — it goes to the admin card, which is where someone can act on it (FR-47).
@@ -63,7 +62,7 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
         // Where an HTTPS provider's requests go, host only: the app asks once per provider and
         // host before anything is sent there, and a compatible endpoint is only nameable by it.
         // Never the path, and the base URL cannot carry credentials (validateBaseUrl).
-        host: hostOf(cfg.provider === 'opencode' ? (envBaseUrl() || baseUrlFor(cfg.provider, cfg)) : baseUrlFor(cfg.provider, cfg)),
+        host: hostOf(baseUrlFor(cfg.provider, cfg)),
         categories: DATA_CATEGORIES,
         version: 1
       });
@@ -198,6 +197,9 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
           connected: p.envKey ? !!(process.env[p.apiKeyEnv] || '').trim() : !!(cfgStore.authFor(cfg, id) && cfgStore.authFor(cfg, id).data)
         })),
         model: cfgStore.modelFor(cfg),
+        // Why the configured models are refused (not free while only-free is on), or null.
+        configProblem: cfgStore.freeProblem(cfg),
+        onlyFree: cfg.provider === 'openrouter' ? cfgStore.onlyFree() : null,
         models: cfg.models,
         baseUrl: cfgStore.providerMeta(cfg).http ? baseUrlFor(cfg.provider, cfg) : null,
         // Extra static headers this endpoint is called with (compatible endpoints only).
@@ -259,6 +261,10 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
       if (body.model !== undefined) {
         patch.models = { ...current.models };
         if (body.model) patch.models[target] = String(body.model).slice(0, 80); else delete patch.models[target];
+      }
+      // Only free models: a paid id is refused here, where it would be stored, not just at send time.
+      if (body.model && target === 'openrouter' && cfgStore.onlyFree() && !cfgStore.isFreeModel(String(body.model).trim())) {
+        return json(res, 400, { error: 'only free models are allowed (OPENROUTER_ONLY_FREE): the id must end in :free, or be openrouter/free' });
       }
       if (body.baseUrl !== undefined) {
         if (!cfgStore.PROVIDERS[target].baseUrl) return json(res, 400, { error: `${target} has a fixed endpoint` });
