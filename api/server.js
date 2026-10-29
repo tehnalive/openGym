@@ -42,6 +42,7 @@ import {
   notificationLang, notificationState, previousWeekRange, telegramLangCode, publicNotificationPreferences, statsForWorkout,
   validNotificationPreferences, weekStart, weeklySummaryText, workoutNotificationText,
 } from './telegram-notifications.mjs';
+import { cardModel, renderCardPng, workoutCardSvg } from './telegram-card.mjs';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -108,6 +109,8 @@ const telegramAllowlist = (() => {
     /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)));
   return { valid, ids: new Set(valid ? values : []) };
 })();
+// PNG report cards; TELEGRAM_CARDS=0 keeps the plain text messages.
+const TELEGRAM_CARDS = process.env.TELEGRAM_CARDS !== '0';
 const TELEGRAM_LOGIN = TELEGRAM_TOKEN_VALID && telegramAllowlist.valid;
 // The language the sign-in screen, and every profile that never picked one, starts in (#303) —
 // for an instance whose people share a language. Only a tag's shape is checked here; the app
@@ -591,6 +594,39 @@ async function sendTelegramNotification(telegramId, text) {
   }
 }
 
+// The workout report is a PNG card (telegram-card.mjs) with a short caption. Any failure on the
+// way (renderer missing, Telegram rejecting the photo) falls back to the plain text message.
+async function sendTelegramPhoto(telegramId, png, caption) {
+  if (!TELEGRAM_LOGIN || typeof telegramId !== 'string' || !telegramId) return false;
+  try {
+    const form = new FormData();
+    form.append('chat_id', telegramId);
+    form.append('caption', caption.slice(0, 1000));
+    form.append('photo', new Blob([png], { type: 'image/png' }), 'workout.png');
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+      method: 'POST', body: form, signal: AbortSignal.timeout(15000),
+    });
+    const result = await response.json();
+    if (!response.ok || result?.ok !== true) throw new Error('Telegram rejected photo');
+    return true;
+  } catch {
+    console.warn('telegram card delivery failed');
+    return false;
+  }
+}
+
+const NL = String.fromCharCode(10);
+async function sendWorkoutReport(user, workout, state, lang, phraseIndex) {
+  const text = workoutNotificationText(workout, state, lang);
+  if (TELEGRAM_CARDS) {
+    try {
+      const png = await renderCardPng(workoutCardSvg(cardModel(workout, state, lang, phraseIndex)));
+      if (png && await sendTelegramPhoto(user.telegramId, png, text.split(NL).slice(0, 3).join(NL))) return;
+    } catch { console.warn('telegram card could not be built'); }
+  }
+  await sendTelegramNotification(user.telegramId, text);
+}
+
 function maybeNotifyNewWorkout(user, previous, next) {
   if (!TELEGRAM_LOGIN || user.disabled || !user.telegramId) return;
   const prefs = publicNotificationPreferences(user);
@@ -614,9 +650,12 @@ function maybeNotifyNewWorkout(user, previous, next) {
   const ids = added.map(({ workout }) => String(workout.id));
   const state = notificationState(user);
   state.attemptedWorkoutIds = [...state.attemptedWorkoutIds, ...ids].slice(-500);
+  // The closing phrase on the card rotates through a fixed list, one step per report.
+  const phraseIndex = Number.isSafeInteger(state.cardPhraseIdx) && state.cardPhraseIdx >= 0 ? state.cardPhraseIdx % 12 : 0;
+  state.cardPhraseIdx = (phraseIndex + 1) % 12;
   try { saveDb(); } catch { console.error('telegram notification checkpoint could not be saved'); return; }
   const latest = added[0].workout;
-  void sendTelegramNotification(user.telegramId, workoutNotificationText(latest, next, notificationLang(user, next)));
+  void sendWorkoutReport(user, latest, next, notificationLang(user, next), phraseIndex);
 }
 
 function telegramWeeklyTick() {

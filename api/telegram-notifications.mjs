@@ -1,4 +1,4 @@
-const MUSCLE_NAMES = Object.freeze({
+export const MUSCLE_NAMES = Object.freeze({
   en: {
     trapezius: 'traps', deltoids: 'shoulders', chest: 'chest', 'upper-back': 'upper back',
     serratus: 'serratus', biceps: 'biceps', triceps: 'triceps', forearm: 'forearms',
