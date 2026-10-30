@@ -7,6 +7,9 @@
 import { copyText } from './clipboard.js'
 
 const ID_RE = /^p_([A-Za-z0-9_-]{8,32})$/
+// A trainer's invitation (TG14): the whole `t_<22>` string is the token the server wants.
+const TRAINER_RE = /^(t_[A-Za-z0-9_-]{22})$/
+const TRAINER_SEEN_KEY = 'opengym_seen_trainer_invites'
 const SEEN_KEY = 'opengym_seen_shares'    // sessionStorage: ids already shown in this Mini App session
 const ADDED_KEY = 'opengym_added_shares'  // localStorage: ids already added on this device
 
@@ -15,6 +18,19 @@ const SHORT_DAY = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 export const shareIdOf = param => {
   const m = ID_RE.exec(typeof param === 'string' ? param : '')
   return m ? m[1] : null
+}
+
+export const trainerTokenOf = param => {
+  const m = TRAINER_RE.exec(typeof param === 'string' ? param : '')
+  return m ? m[1] : null
+}
+
+/** What a launch link carries, by its prefix: `p_` a shared plan, `t_` a trainer's invitation. */
+export function launchOf(param) {
+  const id = shareIdOf(param)
+  if (id) return { kind: 'plan', id }
+  const token = trainerTokenOf(param)
+  return token ? { kind: 'trainer', token } : null
 }
 
 /** The launch's start_param. The signed initData is read first; initDataUnsafe is the SDK's own
@@ -34,12 +50,21 @@ const readList = (storage, key) => {
 const writeList = (storage, key, list) => { try { storage.setItem(key, JSON.stringify(list.slice(-50))) } catch { /* private mode */ } }
 
 let pending = null
+let pendingTrainer = null
 
-/** Remember the shared plan a launch asked for, until the app can show it (after sign-in and,
- *  for a new profile, after the first-run setup). A link already shown in this session is not
- *  asked for again by a reload of the same launch. */
+/** Remember the shared plan (or a trainer's invitation) a launch asked for, until the app can show it
+ *  (after sign-in and, for a new profile, after the first-run setup). A link already shown in this
+ *  session is not asked for again by a reload of the same launch. Returns the plan id; an invitation is
+ *  kept for takePendingTrainer and gives null here, so a caller that only knows plans is unchanged. */
 export function capturePendingShare(sdk) {
-  const id = shareIdOf(startParamOf(sdk))
+  const launch = launchOf(startParamOf(sdk))
+  if (launch?.kind === 'trainer') {
+    let seen = []
+    try { seen = readList(window.sessionStorage, TRAINER_SEEN_KEY) } catch { /* no storage */ }
+    if (!seen.includes(launch.token)) pendingTrainer = launch.token
+    return null
+  }
+  const id = launch?.id
   if (!id) return null
   let seen = []
   try { seen = readList(window.sessionStorage, SEEN_KEY) } catch { /* no storage */ }
@@ -60,6 +85,19 @@ export function takePendingShare() {
 }
 
 export const clearPendingShare = () => { pending = null }
+
+export const peekPendingTrainer = () => pendingTrainer
+
+/** The waiting invitation token, once (marked as shown for this session, like takePendingShare). */
+export function takePendingTrainer() {
+  const token = pendingTrainer
+  if (!token) return null
+  pendingTrainer = null
+  try { const w = window.sessionStorage; writeList(w, TRAINER_SEEN_KEY, [...readList(w, TRAINER_SEEN_KEY), token]) } catch { /* no storage */ }
+  return token
+}
+
+export const clearPendingTrainer = () => { pendingTrainer = null }
 
 /** Whether this plan is already among the routines. The routine carries the label (it travels
  *  with the profile to the other devices); the device list covers a routine since deleted. */
