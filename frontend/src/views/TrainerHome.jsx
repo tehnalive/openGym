@@ -5,10 +5,11 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText, grantsText, daysSince, ago } from '../lib/trainer.js'
 import { sendLink, copyLink } from '../lib/plan-link.js'
-import { Button, Section, Row } from '../components/ui.jsx'
+import { Button, Section, Row, Check, TextField, Segmented } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
 
 const toast = m => useUI.getState().toast(m)
+const open = c => (c.managed ? '/trainer/m/' : '/trainer/') + c.linkId
 const inviteText = 'Приглашаю вас в Жимолость: откройте ссылку, и я смогу смотреть ваш дневник тренировок. Вы сами решите, что мне открыть, и сможете закрыть доступ в любой момент.'
 const when = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) }
 
@@ -19,6 +20,8 @@ export default function TrainerHome() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [fresh, setFresh] = useState(null)   // the invitation just made: { link, expires }
+  const [adding, setAdding] = useState(null)   // null, 'choose' (Telegram or not) or 'managed' (the form)
+  const [form, setForm] = useState({ name: '', note: '', unit: 'kg', age: false })
 
   const load = useCallback(async () => {
     try {
@@ -31,7 +34,17 @@ export default function TrainerHome() {
 
   if (me && !me.trainer.enabled) return <Navigate to="/settings" replace />
 
+  const addManaged = async () => {
+    setBusy(true); setError('')
+    try {
+      const made = await trainerApi.addManaged({ name: form.name, note: form.note, unit: form.unit, ageConfirmed: form.age })
+      toast('Подопечный добавлен')
+      nav('/trainer/m/' + made.linkId)
+    } catch (e) { setError(errorText(e)) }
+    finally { setBusy(false) }
+  }
   const invite = async () => {
+    setAdding(null)
     setBusy(true); setError('')
     try {
       const made = await trainerApi.invite({})
@@ -58,10 +71,10 @@ export default function TrainerHome() {
 
     {clients && (clients.length
       ? <div className="list">{clients.map(c => <div key={c.linkId} className="item" role="button" tabIndex={0}
-        onClick={() => nav('/trainer/' + c.linkId)} onKeyDown={e => { if (e.key === 'Enter') nav('/trainer/' + c.linkId) }}>
+        onClick={() => nav(open(c))} onKeyDown={e => { if (e.key === 'Enter') nav(open(c)) }}>
         <span className="lrow-i" style={{ width: 34, height: 34, borderRadius: 8 }}><Icon name="personCircle" /></span>
         <div className="grow"><div className="tt">{c.name}</div>
-          <div className="ss">{c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`}</div></div>
+          <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div></div>
         <Icon name="chevronRight" className="chev" />
       </div>)}</div>
       : <div className="empty"><div className="ico"><Icon name="personCircle" /></div>Подопечных пока нет. Пригласите первого по ссылке.</div>)}
@@ -69,7 +82,34 @@ export default function TrainerHome() {
     <div style={{ height: 12 }} />
     {full
       ? <div className="dim small" style={{ lineHeight: 1.4, marginBottom: 12 }}>Сейчас доступно {me.trainer.limit} подопечных, позже появится возможность добавить больше.</div>
-      : <Button variant="primary" icon="share" disabled={busy || !me} onClick={invite}>{busy ? 'Создаём…' : 'Пригласить подопечного'}</Button>}
+      : adding === 'managed'
+        ? <div className="card">
+          <div className="tt" style={{ marginBottom: 6 }}>Подопечный без Telegram</div>
+          <div className="dim small" style={{ lineHeight: 1.4, marginBottom: 8 }}>Вы будете вести его дневник сами: записывать тренировки, вес и замеры. Данные хранятся на сервере, вы можете скачать их и удалить в любой момент.</div>
+          <TextField value={form.name} maxLength={40} placeholder="Имя" aria-label="Имя подопечного" onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          <div style={{ height: 8 }} />
+          <TextField value={form.note} maxLength={200} placeholder="Заметка (необязательно)" aria-label="Заметка" onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />
+          <div style={{ height: 8 }} />
+          <Segmented value={form.unit} onChange={unit => setForm(f => ({ ...f, unit }))} options={[{ value: 'kg', label: 'кг' }, { value: 'lb', label: 'фунты' }]} />
+          <div className="row" style={{ gap: 10, marginTop: 12, alignItems: 'flex-start' }}>
+            <Check checked={form.age} onChange={age => setForm(f => ({ ...f, age }))} label="Подопечному есть 18 лет и он согласен" />
+            <span className="small" style={{ lineHeight: 1.4 }}>Подопечному есть 18 лет, он согласен, что я веду его дневник</span>
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 12 }}>
+            <Button variant="primary" disabled={busy || !form.age || !form.name.trim()} onClick={addManaged}>{busy ? 'Создаём…' : 'Добавить'}</Button>
+            <Button onClick={() => setAdding(null)}>Отмена</Button>
+          </div>
+        </div>
+        : adding === 'choose'
+          ? <div className="card">
+            <div className="tt" style={{ marginBottom: 8 }}>Как добавить подопечного?</div>
+            <Button variant="primary" icon="share" disabled={busy || !me} onClick={invite}>Через Telegram</Button>
+            <div className="dim small" style={{ margin: '4px 0 10px', lineHeight: 1.4 }}>Он откроет ссылку и сам решит, что вам показать.</div>
+            <Button icon="personCircle" onClick={() => setAdding('managed')}>У него нет Telegram</Button>
+            <div className="dim small" style={{ margin: '4px 0 10px', lineHeight: 1.4 }}>Вы ведёте его дневник сами.</div>
+            <Button onClick={() => setAdding(null)}>Отмена</Button>
+          </div>
+          : <Button variant="primary" icon="plus" disabled={busy || !me} onClick={() => setAdding('choose')}>{busy ? 'Создаём…' : 'Добавить подопечного'}</Button>}
 
     {fresh && <div style={{ marginTop: 12 }}>
       <div className="dim small" style={{ marginBottom: 6, lineHeight: 1.4 }}>Ссылка работает один раз до {when(fresh.expires)}. Она ваша: отправляйте только тому, кого приглашаете.</div>

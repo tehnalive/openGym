@@ -72,7 +72,8 @@ describe('TrainerHome', () => {
       : apiFor({ '/api/trainer/me': ME, '/api/trainer/clients': CLIENTS })(path))
     const host = mount(routes, '/trainer')
     await flush()
-    click([...host.querySelectorAll('button')].find(b => b.textContent.includes('Пригласить подопечного')))
+    click([...host.querySelectorAll('button')].find(b => b.textContent.includes('Добавить подопечного')))
+    click([...host.querySelectorAll('button')].find(b => b.textContent.includes('Через Telegram')))
     await flush()
     expect(host.querySelector('input[aria-label="Ссылка-приглашение"]').value).toMatch(/^https:\/\/t\.me\/Gym_statsbot\/zhim\?startapp=t_/)
   })
@@ -83,7 +84,7 @@ describe('TrainerHome', () => {
     const host = mount(routes, '/trainer')
     await flush()
     expect(host.textContent).toContain('Сейчас доступно 5 подопечных, позже появится возможность добавить больше')
-    expect([...host.querySelectorAll('button')].some(b => b.textContent.includes('Пригласить'))).toBe(false)
+    expect([...host.querySelectorAll('button')].some(b => b.textContent.includes('Добавить подопечного'))).toBe(false)
   })
 
   it('shows the server\'s refusal of an invitation', async () => {
@@ -92,7 +93,8 @@ describe('TrainerHome', () => {
       : apiFor({ '/api/trainer/me': ME, '/api/trainer/clients': CLIENTS })(path))
     const host = mount(routes, '/trainer')
     await flush()
-    click([...host.querySelectorAll('button')].find(b => b.textContent.includes('Пригласить подопечного')))
+    click([...host.querySelectorAll('button')].find(b => b.textContent.includes('Добавить подопечного')))
+    click([...host.querySelectorAll('button')].find(b => b.textContent.includes('Через Telegram')))
     await flush()
     expect(host.querySelector('[role=alert]').textContent).toContain('Сейчас доступно 5 подопечных')
   })

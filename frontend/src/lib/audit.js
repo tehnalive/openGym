@@ -89,6 +89,11 @@ const LABELS = {
   'trainer.invite.fail': 'A trainer invitation was refused',
   'trainer.read': "Trainer opened a client's data",
   'trainer.link.revoke': 'Ended a trainer link',
+  'trainer.managed.create': 'Added a client without Telegram',
+  'trainer.managed.write': "Trainer changed a managed client's diary",
+  'trainer.managed.export': "Trainer exported a managed client's diary",
+  'trainer.managed.delete': 'Deleted a managed client',
+  'trainer.managed.fail': 'Adding a managed client was refused',
   'trainer.denied': "Trainer blocked from a client's data"
 }
 // An unknown event is shown raw rather than dropped or rendered as "undefined": a dashboard

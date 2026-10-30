@@ -18,7 +18,7 @@ import { confirmSheet } from '../sheets.jsx'
 
 const nameOf = e => (EXIDX[e.id] ? exerciseNameFor(EXIDX[e.id]) : (e.n || e.id || 'Упражнение'))
 
-function WorkoutCard({ row, unit }) {
+export function WorkoutCard({ row, unit, onDelete }) {
   const [open, setOpen] = useState(false)
   const entries = Array.isArray(row.w.entries) ? row.w.entries : []
   return <div className="item" style={{ display: 'block' }}>
@@ -37,21 +37,22 @@ function WorkoutCard({ row, unit }) {
         </div>
       })}
       {row.w.note && <div className="dim small" style={{ marginTop: 6 }}>{row.w.note}</div>}
+      {onDelete && <button className="btn danger" style={{ marginTop: 8 }} onClick={() => onDelete(row.w)}>Удалить тренировку</button>}
     </div>}
   </div>
 }
 
-function History({ view }) {
+export function History({ view, onDelete }) {
   const rows = useMemo(() => workoutRows(view), [view])
   const [shown, setShown] = useState(40)
   if (!rows.length) return <div className="empty"><div className="ico"><Icon name="history" /></div>Тренировок пока нет.</div>
   return <>
-    <div className="list">{rows.slice(0, shown).map(r => <WorkoutCard key={r.id + r.d} row={r} unit={view.unit} />)}</div>
+    <div className="list">{rows.slice(0, shown).map(r => <WorkoutCard key={r.id + r.d} row={r} unit={view.unit} onDelete={onDelete} />)}</div>
     {rows.length > shown && <button className="btn" style={{ marginTop: 10 }} onClick={() => setShown(n => n + 40)}>Показать ещё</button>}
   </>
 }
 
-function Measures({ view }) {
+export function Measures({ view }) {
   const pts = view.bodyweight.filter(b => b && b.d && Number(b.w) > 0).map(b => ({ t: weighInAt(b), y: b.w, d: b.d }))
   const fields = enabledMeasurementFields(view)
   const rows = fields.map(f => ({ f, hit: latestMeasurement(view, f.key) })).filter(r => r.hit)
@@ -72,7 +73,7 @@ function Measures({ view }) {
   </>
 }
 
-function Muscles({ view }) {
+export function Muscles({ view }) {
   const [days, setDays] = useState(30)
   const rows = useMemo(() => muscleRows(view, days), [view, days])
   return <>

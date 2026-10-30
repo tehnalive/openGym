@@ -50,6 +50,12 @@ export const trainerApi = {
   clients: () => call('/api/trainer/clients'),
   clientData: linkId => call('/api/trainer/clients/' + encodeURIComponent(linkId) + '/data'),
   endLink: linkId => call('/api/trainer/links/' + encodeURIComponent(linkId), 'DELETE'),
+  // Managed clients: a diary the trainer keeps for someone without Telegram.
+  addManaged: body => call('/api/trainer/managed', 'POST', body),
+  managed: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId)),
+  managedOps: (linkId, ops, baseRev) => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/ops', 'POST', { ops, ...(baseRev == null ? {} : { baseRev }) }),
+  managedExport: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/export'),
+  deleteManaged: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId), 'DELETE', { confirm: true }),
 }
 
 /** The server's Russian text for a refusal, or ours when the network failed first. */

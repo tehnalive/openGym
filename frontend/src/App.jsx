@@ -81,6 +81,7 @@ const Library = lazyView(() => import('./views/Library.jsx'))
 const Muscles = lazyView(() => import('./views/Muscles.jsx'))
 const TrainerHome = lazyView(() => import('./views/TrainerHome.jsx'))
 const TrainerClient = lazyView(() => import('./views/TrainerClient.jsx'))
+const TrainerManaged = lazyView(() => import('./views/TrainerManaged.jsx'))
 const SettingsRoute = lazyView(() => import('./views/Settings.jsx').then(m => ({ default: m.SettingsRoute })))
 let viewsPrefetched = false
 const prefetchViews = () => {
@@ -310,6 +311,7 @@ function Shell() {
       <Route path="/progress-photos" element={<Navigate to="/stats" replace />} />
       <Route path="/measurements" element={<Measurements />} />
       <Route path="/trainer" element={<TrainerHome />} />
+      <Route path="/trainer/m/:linkId" element={<TrainerManaged />} />
       <Route path="/trainer/:linkId" element={<TrainerClient />} />
       <Route path="/settings" element={<SettingsRoute />} />
       <Route path="/settings/:page" element={<SettingsRoute />} />
