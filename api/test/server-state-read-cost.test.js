@@ -177,5 +177,8 @@ test('the three hot-path state reads all go through readStateCached', () => {
   // thing, uncached.
   // (readStateStrict: a file that cannot be read is a 503, not an empty profile.)
   assert.match(handler('GET /api/data'), /readStateStrict\(user\.id\)/);
-  assert.match(handler('PUT /api/data'), /readStateStrict\(user\.id\)/);
+  // PUT hands the write to commitState (shared with the trainer's writes to a managed client), which reads uncached.
+  assert.match(handler('PUT /api/data'), /commitState\(user, body\)/);
+  const commit = src.slice(src.indexOf('function commitState('), src.indexOf('\nconst routes = {'));
+  assert.match(commit, /readStateStrict\(user\.id\)/);
 });
