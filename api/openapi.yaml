@@ -3787,6 +3787,176 @@ paths:
         '503':
           description: 'The client''s file cannot be read (`unreadable`).'
 
+  /api/trainer/managed:
+    post:
+      tags: [data]
+      operationId: createManagedClient
+      summary: Add a client without Telegram
+      description: |
+        TG14, managed clients. Creates a profile the trainer keeps the diary for: it has no Telegram id, no
+        passkey and no password, and no session can ever be issued for it. It counts towards the 5 client
+        limit. `ageConfirmed` must be true (the client is 18+ and agrees that the trainer keeps the diary).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, ageConfirmed]
+              properties:
+                name: { type: string, maxLength: 40 }
+                note: { type: string, maxLength: 200 }
+                unit: { type: string, enum: [kg, lb] }
+                ageConfirmed: { type: boolean }
+      responses:
+        '200':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  linkId: { type: string }
+                  name: { type: string }
+                  note: { type: string }
+        '400':
+          description: '`name-required`, `age-required` or `bad-request`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
+        '409':
+          description: 'The 5 client limit is reached (`client-limit`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/managed/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getManagedClient
+      summary: Read a managed client's diary
+      description: |
+        The diary without bookkeeping or media, and its revision. Only the trainer who owns the client;
+        another trainer's, a Telegram client's, an ended and an unknown id all answer `404 client-gone`.
+      responses:
+        '200':
+          description: The diary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  linkId: { type: string }
+                  name: { type: string }
+                  note: { type: string }
+                  managed: { type: boolean }
+                  rev: { type: integer }
+                  data: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503':
+          description: 'The file cannot be read (`unreadable`).'
+    delete:
+      tags: [data]
+      operationId: deleteManagedClient
+      summary: Delete a managed client and the diary
+      description: Erases the profile and its diary for good, as deleting an account does. Needs `{ "confirm": true }`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: boolean }
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ok' }
+        '400':
+          description: '`confirm-required`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+
+  /api/trainer/managed/{id}/ops:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: changeManagedClient
+      summary: Change a managed client's diary
+      description: |
+        Up to 20 operations, all or none: `workout.save` (`workout`), `workout.delete` (`id`),
+        `bodyweight.set` (`d`, `w`), `bodyweight.delete` (`d`), `measurement.set` (`d`, `values`),
+        `measurement.delete` (`d`). Written with the revision rules of `PUT /api/data`; a stale `baseRev`
+        answers `409 conflict` with the current diary. 60 writes a minute per trainer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ops]
+              properties:
+                baseRev: { type: integer }
+                ops: { type: array, maxItems: 20, items: { type: object } }
+      responses:
+        '200':
+          description: Written; the new diary comes back.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  rev: { type: integer }
+                  data: { type: object }
+        '400':
+          description: 'An operation was refused (`op-invalid`, `workout-invalid`, `ops-too-many`, `doc-too-big`...).'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '409':
+          description: '`conflict`: the diary changed since `baseRev`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/managed/{id}/export:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: exportManagedClient
+      summary: Export a managed client's diary
+      description: The diary as one JSON document the trainer can save and hand to the client.
+      responses:
+        '200':
+          description: The export.
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/trainer/links/{id}:
     parameters:
       - name: id

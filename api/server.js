@@ -33,6 +33,9 @@ import {
   trimForTrainer, summaryOf, LABEL_MAX
 } from './trainer.js';
 import {
+  isManaged, managedLinkFor, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId,
+} from './trainer-managed.js';
+import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS,
   transportsOf,
 } from './passkeys-store.js';
@@ -846,6 +849,7 @@ function sessionUser(tok) {
   const user = db.users.find(u => u.id === uid) || null;
   if (!user) return null;
   if (user.disabled) return null;           // disabled accounts are locked out everywhere
+  if (isManaged(user)) return null;         // a trainer's managed client (TG14) is a diary, not a login: no session, whatever the token says
   // Missing third field = pre-versioning cookie = version 0. Anything non-numeric is a malformed
   // payload (it still had to pass the HMAC, so this is belt-and-braces) and is refused outright.
   const claimed = ver === undefined ? 0 : Number(ver);
@@ -1547,6 +1551,8 @@ async function removeEmail(req, res, user, body) {
 // device links and live presence, and outside db.json their training history, any Coach
 // credential and their photos and videos. The admin's delete and the account's own both end here.
 function removeAccount(u) {
+  // The diaries a trainer keeps for clients without Telegram go with the trainer: nobody else could reach them.
+  for (const m of db.users.filter(x => x.managedBy === u.id)) removeAccount(m);
   db.users = db.users.filter(x => x.id !== u.id);
   db.creds = (db.creds || []).filter(c => c.userId !== u.id);
   db.subs = (db.subs || []).filter(x => x.userId !== u.id);
@@ -2175,7 +2181,9 @@ function dropExpiredShares() {
 const TRAINER_INVITE_CREATES = createWindow({ max: 10, windowMs: 3600000 });
 const TRAINER_INVITE_TRIES = createWindow({ max: 20, windowMs: 600000 });
 const TRAINER_READS = createWindow({ max: 30, windowMs: 60000 });
-setInterval(() => { TRAINER_INVITE_CREATES.sweep(); TRAINER_INVITE_TRIES.sweep(); TRAINER_READS.sweep(); }, 600000).unref();
+const TRAINER_WRITES = createWindow({ max: 60, windowMs: 60000 });
+const TRAINER_MANAGED_CREATES = createWindow({ max: 10, windowMs: 3600000 });
+setInterval(() => { TRAINER_INVITE_CREATES.sweep(); TRAINER_INVITE_TRIES.sweep(); TRAINER_READS.sweep(); TRAINER_WRITES.sweep(); TRAINER_MANAGED_CREATES.sweep(); }, 600000).unref();
 // link id -> when its last read was audited, so polling a client's page writes one line per ten minutes.
 const trainerReadNoted = new Map();
 function trainerFail(res, status, code, error, extra) {
@@ -2188,6 +2196,19 @@ function trainerCaller(req, res) {
   if (!stateIdentityMatches(req, res, user)) return null;
   if (!user.telegramId) { trainerFail(res, 403, 'telegram-required', 'Режим тренера доступен только при входе через Telegram'); return null; }
   return user;
+}
+// The managed client behind `req.trainerId`, for its own trainer only. Another trainer's, a Telegram client's,
+// a revoked and an unknown id all read the same: not there.
+function managedTarget(req, res, user) {
+  if (!isTrainer(user)) { trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках'); return null; }
+  const link = ID_RE.test(req.trainerId || '') ? managedLinkFor(db, user.id, req.trainerId) : null;
+  const client = link && db.users.find(u => u.id === link.clientUid && u.managedBy === user.id);
+  if (!client || client.disabled) {
+    audit(req, 'trainer.denied', { ok: false, user, msg: 'no-managed-link' });
+    trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
+    return null;
+  }
+  return { link, client };
 }
 // The invite a token stands for, as seen by `user` who is about to open or accept it. A refusal is
 // { fail: { code, args } } with args ready for trainerFail; the wording never tells a stranger anything
@@ -2348,13 +2369,84 @@ function dataWritable() {
   return ok;
 }
 
+// The write behind PUT /api/data, for the document `body.state` of `user` (body: state, baseRev, baseWid, stamped).
+// Returns { status, body } for the caller to send. The trainer's writes to a managed client (TG14) go through
+// here too, so a client document is only ever changed by one set of revision, stamp and conflict rules.
+// readState and atomicWrite are synchronous with nothing awaited between them, so the compare-and-write
+// is atomic for this process.
+function commitState(user, body) {
+  const cur = readStateStrict(user.id);
+  if (cur === UNREADABLE) { console.error('state file unreadable for', user.id); return { status: 503, body: { error: 'state unreadable' } }; }
+  const curRev = cur?._rev || 0;
+  // `_rev` is a counter, so after the data directory went back in time (a restored backup, a
+  // write lost to a power cut) the same number names a different document. Every write also gets
+  // a write id (`_wid`) and keeps its ancestors' (`_wids`): a client quoting the id it last saw
+  // (`baseWid`) is refused when the stored document is not that one, whatever the numbers say,
+  // and a client reading a document can tell whether it descends from its own (useStore pullState).
+  if ((body.baseRev != null && body.baseRev !== curRev) ||
+      (body.baseRev != null && typeof body.baseWid === 'string' && cur?._wid && body.baseWid !== cur._wid)) {
+    return { status: 409, body: { error: 'conflict', rev: curRev, state: forClient(cur) } };
+  }
+  delete body.state.active;              // in-progress workouts stay device-local
+  // "Reset everything" stamps the profile (`resetAt`, with `resetIds`: what it wiped). The stamp
+  // only moves forward: a write without it, or with an older one — a client from before it, a
+  // backup restored over the profile — keeps the stored stamp. Otherwise every device that saw
+  // the reset would take that copy for one older than the reset, and wipe it again on its next
+  // merge (frontend/src/lib/sync-merge.js).
+  const storedReset = Number(cur?.resetAt) || 0;
+  if (storedReset > (Number(body.state.resetAt) || 0)) {
+    body.state.resetAt = cur.resetAt;
+    if (cur.resetIds && typeof cur.resetIds === 'object') body.state.resetIds = cur.resetIds;
+    else delete body.state.resetIds;
+  }
+  // The records of removals and edits only grow, and what a writer that does not stamp its own
+  // changes (an older app, an API script) changed is stamped here, so it is neither wiped nor
+  // undone by the next device that merges (sync-stamps.js).
+  // A document nested too deep to compare is the bad request the stringify below refuses too.
+  const report = {};
+  try { stampPut(cur, body.state, { overRead: body.baseRev != null && body.baseRev === curRev, stamped: body.stamped === true, report }); }
+  catch (e) { if (e instanceof RangeError) return { status: 400, body: { error: 'invalid state' } }; throw e; }
+  body.state._rev = curRev + 1;          // server-owned; whatever the client sent is ignored
+  // A writer that does not stamp (an older app) takes the revision it is told for the document it
+  // sent, and only reads the profile again once the revision moves. When the server put back
+  // something it left out or set back (sync-stamps.js), the document stored is not that one: it
+  // goes in one revision further, so the writer's next check of the revision (every half minute)
+  // finds it moved and reads it, and its next push over the one it was told is a conflict to merge.
+  if (report.changed) body.state._rev = curRev + 2;
+  body.state._wids = [...(Array.isArray(cur?._wids) ? cur._wids : []), ...(cur?._wid ? [cur._wid] : [])]
+    .filter(x => typeof x === 'string').slice(-WID_KEEP);
+  body.state._wid = crypto.randomBytes(8).toString('hex');
+  // JSON.parse takes any nesting, JSON.stringify recurses and runs out of stack on a document
+  // nested some thousands deep. No client builds one; it is a bad request, not a server error.
+  let text;
+  try { text = JSON.stringify(body.state); }
+  catch (e) { if (e instanceof RangeError) return { status: 400, body: { error: 'invalid state' } }; throw e; }
+  atomicWrite(stateFile(user.id), text);
+  // The stat cache cannot see this write on its own: mtime granularity is 4 ms here (ext4 on
+  // this kernel — 3901 of 3999 back-to-back same-size writes shared one timestamp), and a
+  // `_rev` going from 7 to 8 does not change the file's size, so two writes inside one 4 ms
+  // tick are the same (mtimeMs, size) key. A reader that sampled between them would then serve
+  // the old revision until some later write happened to land on a different tick. This is the
+  // only writer of a state file in the tree, so evicting here is the whole fix.
+  stateCache.delete(user.id);
+  // Starts (or stops) the grace clock of every stored file this write stopped (or started)
+  // referencing. Bookkeeping only: the state is already saved, so nothing here may turn a
+  // successful write into an error.
+  if (MEDIA_ON) {
+    try { MEDIA.noteState(user.id, body.state); } catch (e) { console.error('media noteState', e); }
+  }
+  try { maybeNotifyNewWorkout(user, cur, body.state); }
+  catch { console.error('telegram workout notification was skipped'); }
+  return { status: 200, body: { ok: true, ts: body.state._ts || null, rev: curRev + 1, wid: body.state._wid } };
+}
+
 const routes = {
   // 503 rather than a flag in a 200: the container healthcheck is `wget --spider`, which reads
   // the status and nothing else, and an instance that cannot write its data directory is exactly
   // what "unhealthy" is for. The 200 keeps the shape it had, plus the flag it is now asserting.
   'GET /api/health': async (req, res) => {
     if (!dataWritable()) return json(res, 503, { ok: false, writable: false });
-    json(res, 200, { ok: true, users: db.users.length, writable: true });
+    json(res, 200, { ok: true, users: db.users.filter(u => !isManaged(u)).length, writable: true });
   },
 
   // Public config the login screen needs before anyone is signed in. `coach` is absent unless
@@ -2593,6 +2685,7 @@ const routes = {
       if (!client || client.disabled) continue;
       const S = readStateStrict(client.id);
       clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants,
+        ...(link.managed ? { managed: true, note: link.note || '' } : {}),
         ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}) });
     }
     json(res, 200, { clients, limit: TRAINER_CLIENT_LIMIT });
@@ -2616,12 +2709,106 @@ const routes = {
     if (!(trainerReadNoted.get(link.id) > now - 600000)) { trainerReadNoted.set(link.id, now); audit(req, 'trainer.read', { user, target: client }); }
     json(res, 200, { linkId: link.id, name: displayName(client), grants: link.grants, since: link.consentAt, data: trimForTrainer(S || {}, link.grants) });
   },
+  // Managed clients (TG14): a diary the trainer keeps for someone without Telegram. A profile with no way in
+  // (isManaged: sessionUser refuses it); every route here is the owning trainer's, and anything else reads as
+  // "not there". The trainer changes the diary only through applyOps, written by the same function as PUT /api/data.
+  'POST /api/trainer/managed': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const wait = TRAINER_MANAGED_CREATES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const body = await readBody(req);
+    const made = checkCreate(body);
+    if (made.error) return trainerFail(res, 400, made.error, made.text);
+    if (activeLinks(db, user.id).length >= TRAINER_CLIENT_LIMIT) {
+      audit(req, 'trainer.managed.fail', { ok: false, user, msg: 'client-limit' });
+      return trainerFail(res, 409, 'client-limit', CLIENT_LIMIT_MESSAGE, { limit: TRAINER_CLIENT_LIMIT });
+    }
+    const at = new Date().toISOString();
+    // The suffix keeps profile names unique (displayName drops it); nobody signs in by this name.
+    const client = { id: newManagedId(), name: made.name + ' · ' + crypto.randomBytes(4).toString('hex'), created: at, managedBy: user.id };
+    const link = { id: newId(), coachUid: user.id, clientUid: client.id, status: 'active', managed: true, note: made.note,
+      grants: { history: true, measures: true, stats: true }, ageConfirmedAt: at, consentAt: at, consentVersion: CONSENT_VERSION, createdAt: at };
+    const first = commitState(client, { state: emptyManagedDoc(made.unit) });
+    if (first.status !== 200) return trainerFail(res, 500, 'create-failed', 'Не удалось создать подопечного, попробуйте ещё раз');
+    db.users.push(client); db.trainerLinks.push(link);
+    try { saveDb(); }
+    catch (error) {
+      db.users.pop(); db.trainerLinks.pop();
+      try { fs.unlinkSync(stateFile(client.id)); } catch { /* never written */ }
+      throw error;
+    }
+    audit(req, 'trainer.managed.create', { user, target: client });
+    json(res, 200, { linkId: link.id, name: made.name, note: made.note });
+  },
+  'GET /api/trainer/managed/{id}': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const S = readStateStrict(t.client.id);
+    if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
+    json(res, 200, { linkId: t.link.id, name: displayName(t.client), note: t.link.note || '', managed: true, rev: S?._rev || 0, data: managedView(S || {}) });
+  },
+  'POST /api/trainer/managed/{id}/ops': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const body = await readBody(req);
+    // The await above: the link may have been deleted meanwhile.
+    if (!managedLinkFor(db, user.id, t.link.id) || !db.users.includes(t.client)) return trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
+    const cur = readStateStrict(t.client.id);
+    if (cur === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
+    const rev = cur?._rev || 0;
+    if (body.baseRev != null && body.baseRev !== rev) {
+      return trainerFail(res, 409, 'conflict', 'Дневник изменился в другом окне. Данные обновлены, повторите действие', { rev, data: managedView(cur || {}) });
+    }
+    const applied = applyOps(cur || {}, body.ops, Date.now());
+    if (applied.error) return trainerFail(res, 400, applied.error, applied.text);
+    applied.doc._ts = Math.max(Date.now(), (Number(cur?._ts) || 0) + 1);
+    const out = commitState(t.client, { state: applied.doc, baseRev: rev, baseWid: cur?._wid });
+    if (out.status !== 200) return trainerFail(res, out.status, out.body.error === 'conflict' ? 'conflict' : 'write-failed', 'Не удалось записать, попробуйте ещё раз');
+    audit(req, 'trainer.managed.write', { user, target: t.client, msg: [...new Set(applied.changes)].join(',') });
+    json(res, 200, { ok: true, rev: out.body.rev, data: managedView(readStateStrict(t.client.id) || {}) });
+  },
+  'GET /api/trainer/managed/{id}/export': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const S = readStateStrict(t.client.id);
+    if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
+    audit(req, 'trainer.managed.export', { user, target: t.client });
+    json(res, 200, managedExport(displayName(t.client), S || {}));
+  },
+  'DELETE /api/trainer/managed/{id}': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const body = await readBody(req);
+    if (body.confirm !== true) return trainerFail(res, 400, 'confirm-required', 'Подтвердите удаление подопечного и его дневника');
+    if (!managedLinkFor(db, user.id, t.link.id)) return trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
+    removeAccount(t.client);
+    trainerReadNoted.delete(t.link.id);
+    audit(req, 'trainer.managed.delete', { user, target: t.client });
+    json(res, 200, { ok: true });
+  },
   'DELETE /api/trainer/links/{id}': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active'
       && (l.coachUid === user.id || l.clientUid === user.id)) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    if (link.managed) return trainerFail(res, 409, 'managed-link', 'Подопечный без Telegram удаляется целиком: откройте его и выберите «Удалить подопечного»');
     link.status = 'revoked'; link.revokedAt = new Date().toISOString(); link.revokedBy = link.clientUid === user.id ? 'client' : 'coach';
     try { saveDb(); } catch (error) { link.status = 'active'; delete link.revokedAt; delete link.revokedBy; throw error; }
     trainerReadNoted.delete(link.id);
@@ -3067,69 +3254,8 @@ const routes = {
     // before revisions, or a deliberate replace such as a backup import) overwrites, as before.
     // readState and atomicWrite are synchronous with nothing awaited between them, so the
     // compare-and-write is atomic for this process.
-    const cur = readStateStrict(user.id);
-    if (cur === UNREADABLE) { console.error('state file unreadable for', user.id); return json(res, 503, { error: 'state unreadable' }); }
-    const curRev = cur?._rev || 0;
-    // `_rev` is a counter, so after the data directory went back in time (a restored backup, a
-    // write lost to a power cut) the same number names a different document. Every write also gets
-    // a write id (`_wid`) and keeps its ancestors' (`_wids`): a client quoting the id it last saw
-    // (`baseWid`) is refused when the stored document is not that one, whatever the numbers say,
-    // and a client reading a document can tell whether it descends from its own (useStore pullState).
-    if ((body.baseRev != null && body.baseRev !== curRev) ||
-        (body.baseRev != null && typeof body.baseWid === 'string' && cur?._wid && body.baseWid !== cur._wid)) {
-      return json(res, 409, { error: 'conflict', rev: curRev, state: forClient(cur) });
-    }
-    delete body.state.active;              // in-progress workouts stay device-local
-    // "Reset everything" stamps the profile (`resetAt`, with `resetIds`: what it wiped). The stamp
-    // only moves forward: a write without it, or with an older one — a client from before it, a
-    // backup restored over the profile — keeps the stored stamp. Otherwise every device that saw
-    // the reset would take that copy for one older than the reset, and wipe it again on its next
-    // merge (frontend/src/lib/sync-merge.js).
-    const storedReset = Number(cur?.resetAt) || 0;
-    if (storedReset > (Number(body.state.resetAt) || 0)) {
-      body.state.resetAt = cur.resetAt;
-      if (cur.resetIds && typeof cur.resetIds === 'object') body.state.resetIds = cur.resetIds;
-      else delete body.state.resetIds;
-    }
-    // The records of removals and edits only grow, and what a writer that does not stamp its own
-    // changes (an older app, an API script) changed is stamped here, so it is neither wiped nor
-    // undone by the next device that merges (sync-stamps.js).
-    // A document nested too deep to compare is the bad request the stringify below refuses too.
-    const report = {};
-    try { stampPut(cur, body.state, { overRead: body.baseRev != null && body.baseRev === curRev, stamped: body.stamped === true, report }); }
-    catch (e) { if (e instanceof RangeError) return json(res, 400, { error: 'invalid state' }); throw e; }
-    body.state._rev = curRev + 1;          // server-owned; whatever the client sent is ignored
-    // A writer that does not stamp (an older app) takes the revision it is told for the document it
-    // sent, and only reads the profile again once the revision moves. When the server put back
-    // something it left out or set back (sync-stamps.js), the document stored is not that one: it
-    // goes in one revision further, so the writer's next check of the revision (every half minute)
-    // finds it moved and reads it, and its next push over the one it was told is a conflict to merge.
-    if (report.changed) body.state._rev = curRev + 2;
-    body.state._wids = [...(Array.isArray(cur?._wids) ? cur._wids : []), ...(cur?._wid ? [cur._wid] : [])]
-      .filter(x => typeof x === 'string').slice(-WID_KEEP);
-    body.state._wid = crypto.randomBytes(8).toString('hex');
-    // JSON.parse takes any nesting, JSON.stringify recurses and runs out of stack on a document
-    // nested some thousands deep. No client builds one; it is a bad request, not a server error.
-    let text;
-    try { text = JSON.stringify(body.state); }
-    catch (e) { if (e instanceof RangeError) return json(res, 400, { error: 'invalid state' }); throw e; }
-    atomicWrite(stateFile(user.id), text);
-    // The stat cache cannot see this write on its own: mtime granularity is 4 ms here (ext4 on
-    // this kernel — 3901 of 3999 back-to-back same-size writes shared one timestamp), and a
-    // `_rev` going from 7 to 8 does not change the file's size, so two writes inside one 4 ms
-    // tick are the same (mtimeMs, size) key. A reader that sampled between them would then serve
-    // the old revision until some later write happened to land on a different tick. This is the
-    // only writer of a state file in the tree, so evicting here is the whole fix.
-    stateCache.delete(user.id);
-    // Starts (or stops) the grace clock of every stored file this write stopped (or started)
-    // referencing. Bookkeeping only: the state is already saved, so nothing here may turn a
-    // successful write into an error.
-    if (MEDIA_ON) {
-      try { MEDIA.noteState(user.id, body.state); } catch (e) { console.error('media noteState', e); }
-    }
-    try { maybeNotifyNewWorkout(user, cur, body.state); }
-    catch { console.error('telegram workout notification was skipped'); }
-    json(res, 200, { ok: true, ts: body.state._ts || null, rev: curRev + 1, wid: body.state._wid });
+    const out = commitState(user, body);
+    json(res, out.status, out.body);
   },
 
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
@@ -3272,6 +3398,7 @@ const routes = {
       return {
         id: u.id, name: u.name, created: u.created || null,
         disabled: !!u.disabled, admin: isAdmin(u), owner: isOwner(u), invitedBy: u.invitedBy || null,
+        ...(isManaged(u) ? { managed: true, managedBy: u.managedBy } : {}),
         workouts: workouts.length,
         lastWorkout: last ? last.d : null,
         lastSync: lastSyncOf(u, S),
@@ -3502,7 +3629,7 @@ coachJobs.setProposalHook((uid, pending) => {
     tag: 'coach-proposal', url: '#/coach'
   });
 });
-startCadence({ users: () => db.users.filter(u => !u.disabled), userNow, skip: uid => !stateSummary(uid)?.consent });
+startCadence({ users: () => db.users.filter(u => !u.disabled && !isManaged(u)), userNow, skip: uid => !stateSummary(uid)?.consent });
 startWarmup();
 
 // node's requestTimeout is one number for every route, and it is half an hour (below) for the
@@ -3576,6 +3703,8 @@ const server = http.createServer(async (req, res) => {
   if (tm && req.method === 'DELETE') { key = 'DELETE /api/trainer/' + tm[1] + '/{id}'; req.trainerId = tm[2]; }
   const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);
   if (tc) { key = req.method + ' /api/trainer/clients/{id}/data'; req.trainerId = tc[1]; }
+  const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export))?$/.exec(url.pathname);
+  if (tg) { key = req.method + ' /api/trainer/managed/{id}' + (tg[2] ? '/' + tg[2] : ''); req.trainerId = tg[1]; }
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: 'not found' });
   if (TELEGRAM_ONLY && TELEGRAM_ONLY_REFUSED.has(key)) return json(res, 403, { error: 'sign-in is only through Telegram', code: 'telegram-only' });
