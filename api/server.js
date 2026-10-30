@@ -28,6 +28,11 @@ import {
 import { createBackoff, createWindow } from './rate-limit.js';
 import { SHARE_ID_RE, newShareId, checkBundle, authorName, shareLink, shareExpired } from './shares.js';
 import {
+  TRAINER_CLIENT_LIMIT, CONSENT_VERSION, INVITE_DAYS, INVITE_DEFAULT_DAYS, INVITE_MAX_OPEN, GRANT_KEYS, CLIENT_LIMIT_MESSAGE, TOKEN_RE, ID_RE,
+  newToken, newId, hashToken, inviteLink, displayName, isTrainer, activeLinks, clientLink, inviteState, pruneInvites, checkGrants,
+  trimForTrainer, summaryOf, LABEL_MAX
+} from './trainer.js';
+import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS,
   transportsOf,
 } from './passkeys-store.js';
@@ -189,6 +194,8 @@ db.creds = db.creds || [];
 db.subs = db.subs || [];
 db.invites = db.invites || [];
 db.shares = db.shares || [];             // shared training plans (shares.js), at most SHARE_MAX_PER_USER a profile
+db.trainerInvites = db.trainerInvites || [];   // trainer-mode invitations, by token hash (trainer.js)
+db.trainerLinks = db.trainerLinks || [];         // trainer-client links and what the client opened (trainer.js)
 db.deviceLinks = db.deviceLinks || [];   // unused one-time device links, hashed (device-link.js)
 const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(user.id));
 // One owner per instance, any number of admins. Admins run the place day to day (users, invites,
@@ -1545,6 +1552,8 @@ function removeAccount(u) {
   db.subs = (db.subs || []).filter(x => x.userId !== u.id);
   dropDeviceLinks(db, u.id);
   db.shares = (db.shares || []).filter(x => x.userId !== u.id);
+  db.trainerInvites = db.trainerInvites.filter(x => x.coachUid !== u.id && x.usedBy !== u.id);
+  db.trainerLinks = db.trainerLinks.filter(x => x.coachUid !== u.id && x.clientUid !== u.id);
   presence.delete(u.id);
   // The training history and any Coach credential of theirs, both outside db.json.
   try { fs.unlinkSync(stateFile(u.id)); } catch { /* already gone */ }
@@ -2161,6 +2170,45 @@ function dropExpiredShares() {
   db.shares = db.shares.filter(x => !shareExpired(x));
   return db.shares.length !== before;
 }
+// Trainer mode (TG14, stage 1). Invites and links live in db.json (`trainerInvites`, `trainerLinks`); the
+// pure rules are in trainer.js. Reading a client's data is the one thing a trainer can do here.
+const TRAINER_INVITE_CREATES = createWindow({ max: 10, windowMs: 3600000 });
+const TRAINER_INVITE_TRIES = createWindow({ max: 20, windowMs: 600000 });
+const TRAINER_READS = createWindow({ max: 30, windowMs: 60000 });
+setInterval(() => { TRAINER_INVITE_CREATES.sweep(); TRAINER_INVITE_TRIES.sweep(); TRAINER_READS.sweep(); }, 600000).unref();
+// link id -> when its last read was audited, so polling a client's page writes one line per ten minutes.
+const trainerReadNoted = new Map();
+function trainerFail(res, status, code, error, extra) {
+  json(res, status, { error, code, ...(extra || {}) });
+}
+// The signed-in caller of a trainer route: a profile made through Telegram, with the tab check passed.
+function trainerCaller(req, res) {
+  const user = readSession(req);
+  if (!user) { json(res, 401, { error: 'not signed in' }); return null; }
+  if (!stateIdentityMatches(req, res, user)) return null;
+  if (!user.telegramId) { trainerFail(res, 403, 'telegram-required', 'Режим тренера доступен только при входе через Telegram'); return null; }
+  return user;
+}
+// The invite a token stands for, as seen by `user` who is about to open or accept it. A refusal is
+// { fail: { code, args } } with args ready for trainerFail; the wording never tells a stranger anything
+// beyond "this link does not work".
+function trainerInviteFor(token, user) {
+  const refuse = (status, code, text) => ({ fail: { code, args: [status, code, text] } });
+  const gone = () => refuse(404, 'invite-gone', 'Эта ссылка не работает: она отозвана или неверна');
+  if (typeof token !== 'string' || !TOKEN_RE.test(token)) return gone();
+  const hash = hashToken(token);
+  const invite = db.trainerInvites.find(i => i.hash === hash);
+  const coach = invite && db.users.find(u => u.id === invite.coachUid);
+  if (!invite || !coach || coach.disabled || !isTrainer(coach)) return gone();
+  const state = inviteState(invite);
+  if (state === 'revoked') return gone();
+  if (state === 'used') return refuse(410, 'invite-used', 'Эта ссылка уже использована');
+  if (state === 'expired') return refuse(410, 'invite-expired', 'Срок ссылки истёк, попросите тренера прислать новую');
+  if (coach.id === user.id) return refuse(409, 'self-invite', 'Это ваша собственная ссылка');
+  if (clientLink(db, user.id)) return refuse(409, 'has-trainer', 'У вас уже есть тренер. Сначала прекратите прежний доступ в настройках');
+  if (activeLinks(db, coach.id).length >= TRAINER_CLIENT_LIMIT) return refuse(409, 'coach-full', 'У этого тренера сейчас нет свободных мест');
+  return { invite, coach };
+}
 const PUSH_TESTS = createWindow({ max: 10, windowMs: 600000 });
 const REST_TIMER_SETS = createWindow({ max: 60, windowMs: 60000 });
 setInterval(() => { PUSH_TESTS.sweep(); REST_TIMER_SETS.sweep(); }, 600000).unref();
@@ -2410,6 +2458,174 @@ const routes = {
     const [removed] = db.shares.splice(index, 1);
     try { saveDb(); } catch (error) { db.shares.splice(index, 0, removed); throw error; }
     audit(req, 'share.revoke', { user });
+    json(res, 200, { ok: true });
+  },
+
+  // Trainer mode, stage 1 (TG14): a trainer reads what a client chose to open, nothing more.
+  // Every check is made on every request from db.json (no cached rights); a client is only ever
+  // addressed by the link id, and nobody's Telegram id is part of any answer.
+  'GET /api/trainer/me': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const link = clientLink(db, user.id);
+    const coach = link && db.users.find(u => u.id === link.coachUid);
+    json(res, 200, {
+      consentVersion: CONSENT_VERSION,
+      trainer: isTrainer(user) ? {
+        enabled: true, since: user.trainer.since || null, limit: TRAINER_CLIENT_LIMIT, clients: activeLinks(db, user.id).length,
+        invites: db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open')
+          .map(i => ({ id: i.id, label: i.label || '', created: i.created, expires: i.expires }))
+      } : { enabled: false, limit: TRAINER_CLIENT_LIMIT },
+      asClient: link && coach ? { linkId: link.id, coachName: displayName(coach), grants: link.grants, consentAt: link.consentAt } : null
+    });
+  },
+  'PUT /api/trainer/me': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (readSession(req) !== user || !stateIdentityMatches(req, res, user)) return;
+    if (typeof body.enabled !== 'boolean') return trainerFail(res, 400, 'bad-request', 'Не указано, включать ли роль тренера');
+    const before = user.trainer;
+    if (body.enabled) {
+      if (body.ageConfirmed !== true) return trainerFail(res, 400, 'age-required', 'Нужно подтвердить, что вам есть 18 лет');
+      user.trainer = { enabled: true, since: before?.since || new Date().toISOString(), ageConfirmedAt: new Date().toISOString() };
+    } else {
+      if (activeLinks(db, user.id).length) return trainerFail(res, 409, 'has-clients', 'Сначала завершите связь со всеми подопечными');
+      if (before) user.trainer = { ...before, enabled: false };
+    }
+    const invites = db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open');
+    if (!body.enabled) invites.forEach(i => { i.revokedAt = new Date().toISOString(); });
+    try { saveDb(); } catch (error) {
+      if (before) user.trainer = before; else delete user.trainer;
+      invites.forEach(i => { delete i.revokedAt; });
+      throw error;
+    }
+    audit(req, body.enabled ? 'trainer.enable' : 'trainer.disable', { user });
+    json(res, 200, { ok: true, enabled: body.enabled });
+  },
+  'POST /api/trainer/invites': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_INVITE_CREATES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const body = await readBody(req);
+    if (readSession(req) !== user || !stateIdentityMatches(req, res, user)) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const days = body.days === undefined ? INVITE_DEFAULT_DAYS : body.days;
+    if (!INVITE_DAYS.includes(days)) return trainerFail(res, 400, 'days-invalid', 'Срок приглашения: 1, 7 или 30 дней');
+    if (body.label !== undefined && typeof body.label !== 'string') return trainerFail(res, 400, 'bad-request', 'Метка должна быть текстом');
+    pruneInvites(db);
+    if (activeLinks(db, user.id).length >= TRAINER_CLIENT_LIMIT) {
+      audit(req, 'trainer.invite.fail', { ok: false, user, msg: 'client-limit' });
+      return trainerFail(res, 409, 'client-limit', CLIENT_LIMIT_MESSAGE, { limit: TRAINER_CLIENT_LIMIT });
+    }
+    if (db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open').length >= INVITE_MAX_OPEN) {
+      return trainerFail(res, 409, 'invite-limit', 'Слишком много неиспользованных приглашений, отзовите лишние', { limit: INVITE_MAX_OPEN });
+    }
+    const token = newToken();
+    const now = Date.now();
+    const invite = { id: newId(), hash: hashToken(token), coachUid: user.id, label: String(body.label || '').trim().slice(0, LABEL_MAX),
+      created: new Date(now).toISOString(), expires: new Date(now + days * 86400000).toISOString() };
+    db.trainerInvites.push(invite);
+    try { saveDb(); } catch (error) { db.trainerInvites.pop(); throw error; }
+    audit(req, 'trainer.invite.create', { user });
+    json(res, 200, { id: invite.id, link: inviteLink(token, SHARE_BOT, SHARE_APP), label: invite.label, created: invite.created, expires: invite.expires });
+  },
+  'GET /api/trainer/invites': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    json(res, 200, { invites: db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open')
+      .map(i => ({ id: i.id, label: i.label || '', created: i.created, expires: i.expires })) });
+  },
+  'DELETE /api/trainer/invites/{id}': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const invite = ID_RE.test(req.trainerId || '') ? db.trainerInvites.find(i => i.id === req.trainerId && i.coachUid === user.id) : null;
+    if (!invite) return trainerFail(res, 404, 'invite-gone', 'Приглашение не найдено');
+    if (invite.usedAt) return trainerFail(res, 409, 'invite-used', 'Приглашение уже принято');
+    if (!invite.revokedAt) {
+      invite.revokedAt = new Date().toISOString();
+      try { saveDb(); } catch (error) { delete invite.revokedAt; throw error; }
+      audit(req, 'trainer.invite.revoke', { user });
+    }
+    json(res, 200, { ok: true });
+  },
+  'GET /api/trainer/invites/preview': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_INVITE_TRIES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const found = trainerInviteFor(new URL(req.url, 'http://x').searchParams.get('t'), user);
+    if (found.fail) { audit(req, 'trainer.invite.fail', { ok: false, user, msg: found.fail.code }); return trainerFail(res, ...found.fail.args); }
+    json(res, 200, { coachName: displayName(found.coach), grants: GRANT_KEYS, consentVersion: CONSENT_VERSION, expires: found.invite.expires });
+  },
+  'POST /api/trainer/invites/accept': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_INVITE_TRIES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const body = await readBody(req);
+    if (readSession(req) !== user || !stateIdentityMatches(req, res, user)) return;
+    if (body.ageConfirmed !== true) return trainerFail(res, 400, 'age-required', 'Нужно подтвердить, что вам есть 18 лет');
+    const grants = checkGrants(body.grants);
+    if (typeof grants === 'string') return trainerFail(res, 400, grants, grants === 'grants-required'
+      ? 'Выберите, что открыть тренеру' : 'Статистика по мышцам открывается вместе с историей тренировок');
+    const found = trainerInviteFor(body.token, user);
+    if (found.fail) { audit(req, 'trainer.invite.fail', { ok: false, user, msg: found.fail.code }); return trainerFail(res, ...found.fail.args); }
+    const now = new Date().toISOString();
+    const link = { id: newId(), coachUid: found.coach.id, clientUid: user.id, status: 'active', grants,
+      ageConfirmedAt: now, consentAt: now, consentVersion: CONSENT_VERSION, createdAt: now };
+    // One synchronous step from the check to the write: the token burns exactly once.
+    found.invite.usedBy = user.id; found.invite.usedAt = now;
+    db.trainerLinks.push(link);
+    try { saveDb(); } catch (error) { db.trainerLinks.pop(); delete found.invite.usedBy; delete found.invite.usedAt; throw error; }
+    audit(req, 'trainer.invite.accept', { user, target: found.coach });
+    json(res, 200, { ok: true, linkId: link.id, coachName: displayName(found.coach), grants });
+  },
+  'GET /api/trainer/clients': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const clients = [];
+    for (const link of activeLinks(db, user.id)) {
+      const client = db.users.find(u => u.id === link.clientUid);
+      if (!client || client.disabled) continue;
+      const S = readStateStrict(client.id);
+      clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants,
+        ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}) });
+    }
+    json(res, 200, { clients, limit: TRAINER_CLIENT_LIMIT });
+  },
+  'GET /api/trainer/clients/{id}/data': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    // Another trainer's link, a client's own link and an unknown id all read the same: not there.
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.coachUid === user.id && l.status === 'active') : null;
+    const client = link && db.users.find(u => u.id === link.clientUid);
+    if (!link || !client || client.disabled) {
+      audit(req, 'trainer.denied', { ok: false, user, msg: 'no-link' });
+      return trainerFail(res, 404, 'client-gone', 'Подопечный недоступен: доступ закрыт или не открыт');
+    }
+    const S = readStateStrict(client.id);
+    if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Данные подопечного сейчас не читаются, попробуйте позже');
+    const now = Date.now();
+    if (!(trainerReadNoted.get(link.id) > now - 600000)) { trainerReadNoted.set(link.id, now); audit(req, 'trainer.read', { user, target: client }); }
+    json(res, 200, { linkId: link.id, name: displayName(client), grants: link.grants, since: link.consentAt, data: trimForTrainer(S || {}, link.grants) });
+  },
+  'DELETE /api/trainer/links/{id}': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active'
+      && (l.coachUid === user.id || l.clientUid === user.id)) : null;
+    if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    link.status = 'revoked'; link.revokedAt = new Date().toISOString(); link.revokedBy = link.clientUid === user.id ? 'client' : 'coach';
+    try { saveDb(); } catch (error) { link.status = 'active'; delete link.revokedAt; delete link.revokedBy; throw error; }
+    trainerReadNoted.delete(link.id);
+    audit(req, 'trainer.link.revoke', { user, msg: link.revokedBy });
     json(res, 200, { ok: true });
   },
 
@@ -3356,6 +3572,10 @@ const server = http.createServer(async (req, res) => {
   if (mm) { key = req.method + ' /api/media/{hash}'; req.mediaHash = mm[1]; }
   const sm = /^\/api\/shares\/([^/]+)$/.exec(url.pathname);
   if (sm) { key = req.method + ' /api/shares/{id}'; req.shareId = sm[1]; }
+  const tm = /^\/api\/trainer\/(invites|links)\/([^/]+)$/.exec(url.pathname);
+  if (tm && req.method === 'DELETE') { key = 'DELETE /api/trainer/' + tm[1] + '/{id}'; req.trainerId = tm[2]; }
+  const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);
+  if (tc) { key = req.method + ' /api/trainer/clients/{id}/data'; req.trainerId = tc[1]; }
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: 'not found' });
   if (TELEGRAM_ONLY && TELEGRAM_ONLY_REFUSED.has(key)) return json(res, 403, { error: 'sign-in is only through Telegram', code: 'telegram-only' });

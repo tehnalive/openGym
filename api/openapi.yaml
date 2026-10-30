@@ -3480,6 +3480,337 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/trainer/me:
+    get:
+      tags: [data]
+      operationId: getTrainerMe
+      summary: My trainer role and my trainer
+      description: |
+        Trainer mode (TG14, stage 1). Every `/api/trainer/*` route needs a profile made through
+        Telegram (`403 telegram-required` otherwise). Answers whether the caller is a trainer (with the
+        open invitations and the number of clients) and who their own trainer is, if any: the
+        trainer's display name only, never a Telegram id or handle.
+      responses:
+        '200':
+          description: The caller's trainer state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consentVersion: { type: integer }
+                  trainer:
+                    type: object
+                    properties:
+                      enabled: { type: boolean }
+                      limit: { type: integer, description: 'Active clients a trainer may have (5).' }
+                      clients: { type: integer }
+                      since: { type: string, format: date-time, nullable: true }
+                      invites: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string }, created: { type: string }, expires: { type: string } } } }
+                  asClient:
+                    type: object
+                    nullable: true
+                    properties:
+                      linkId: { type: string }
+                      coachName: { type: string }
+                      grants: { $ref: '#/components/schemas/TrainerGrants' }
+                      consentAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a Telegram profile (`code: telegram-required`).'
+    put:
+      tags: [data]
+      operationId: setTrainerRole
+      summary: Turn the trainer role on or off
+      description: |
+        `{ enabled: true, ageConfirmed: true }` turns it on; without `ageConfirmed: true` the answer is
+        `400 age-required`, and the time of the confirmation is stored. `{ enabled: false }` turns it
+        off, revokes the open invitations, and is refused with `409 has-clients` while a client link is
+        active.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                ageConfirmed: { type: boolean }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  enabled: { type: boolean }
+        '400':
+          description: '`age-required` or `bad-request`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a Telegram profile (`telegram-required`).'
+        '409':
+          description: 'Active clients remain (`has-clients`).'
+
+  /api/trainer/invites:
+    get:
+      tags: [data]
+      operationId: listTrainerInvites
+      summary: My open client invitations
+      description: Open invitations of the calling trainer, without their tokens (a token is shown once, in the link).
+      responses:
+        '200':
+          description: The open invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invites: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string }, created: { type: string }, expires: { type: string } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
+    post:
+      tags: [data]
+      operationId: createTrainerInvite
+      summary: Invite a client by link
+      description: |
+        Returns a one-time Telegram Mini App link `https://t.me/<bot>/<app>?startapp=t_<token>`
+        (`TELEGRAM_BOT_USERNAME`, `TELEGRAM_MINI_APP_SHORT_NAME`, as for shared plans). The token is
+        128 bits, stored only as a hash, valid for `days` (1, 7 or 30; default 7) and burns when a
+        client accepts it. Refused with `409 client-limit` (message: "Сейчас доступно 5 подопечных,
+        позже появится возможность добавить больше") while the trainer has 5 active clients, with
+        `409 invite-limit` at 20 open invitations. At most 10 new invitations an hour.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days: { type: integer, enum: [1, 7, 30] }
+                label: { type: string, maxLength: 60, description: 'A note for the trainer only.' }
+      responses:
+        '200':
+          description: The invitation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  link: { type: string }
+                  label: { type: string }
+                  created: { type: string, format: date-time }
+                  expires: { type: string, format: date-time }
+        '400':
+          description: '`days-invalid` or `bad-request`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
+        '409':
+          description: '`client-limit` or `invite-limit`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/invites/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The invitation id from the list (not the token).
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    delete:
+      tags: [data]
+      operationId: revokeTrainerInvite
+      summary: Revoke an invitation
+      description: The link stops working at once. Only the trainer who made it can; an accepted one answers `409 invite-used`.
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ok' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Unknown, or not the caller''s (`invite-gone`).'
+        '409':
+          description: 'Already accepted (`invite-used`).'
+
+  /api/trainer/invites/preview:
+    get:
+      tags: [data]
+      operationId: previewTrainerInvite
+      summary: What an invitation asks, for the consent screen
+      description: |
+        `?t=t_<token>`. Gives the trainer's display name and the sections that can be opened. A wrong or
+        revoked token is `404 invite-gone`; used `410 invite-used`; expired `410 invite-expired`; the
+        trainer's own link `409 self-invite`; a caller who already has a trainer `409 has-trainer`; a
+        trainer with no free place `409 coach-full`. 20 tries per ten minutes per profile.
+      parameters:
+        - name: t
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The invitation can be accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coachName: { type: string }
+                  grants: { type: array, items: { type: string, enum: [history, measures, stats] } }
+                  consentVersion: { type: integer }
+                  expires: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`invite-gone`.'
+        '409':
+          description: '`self-invite`, `has-trainer` or `coach-full`.'
+        '410':
+          description: '`invite-used` or `invite-expired`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/invites/accept:
+    post:
+      tags: [data]
+      operationId: acceptTrainerInvite
+      summary: Accept an invitation and choose what to open
+      description: |
+        Needs `ageConfirmed: true` (`400 age-required`) and at least one of `grants.history`,
+        `grants.measures`, `grants.stats` (`400 grants-required`); `stats` needs `history`
+        (`400 grants-invalid`). Photos and the AI coach chat cannot be opened. The time of consent and the
+        consent text version are stored. The token burns once; the refusals are those of the preview.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, ageConfirmed, grants]
+              properties:
+                token: { type: string }
+                ageConfirmed: { type: boolean }
+                grants: { $ref: '#/components/schemas/TrainerGrants' }
+      responses:
+        '200':
+          description: The link is active.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  linkId: { type: string }
+                  coachName: { type: string }
+                  grants: { $ref: '#/components/schemas/TrainerGrants' }
+        '400':
+          description: '`age-required`, `grants-required` or `grants-invalid`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`invite-gone`.'
+        '409':
+          description: '`self-invite`, `has-trainer` or `coach-full`.'
+        '410':
+          description: '`invite-used` or `invite-expired`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/clients:
+    get:
+      tags: [data]
+      operationId: listTrainerClients
+      summary: My clients
+      description: The calling trainer's active clients with a one-line summary of what they opened. Names are display names; no ids but the link id.
+      responses:
+        '200':
+          description: The clients.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limit: { type: integer }
+                  clients:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        linkId: { type: string }
+                        name: { type: string }
+                        since: { type: string, format: date-time }
+                        grants: { $ref: '#/components/schemas/TrainerGrants' }
+                        workouts: { type: integer, description: 'Only with the history or stats grant.' }
+                        lastWorkout: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
+
+  /api/trainer/clients/{id}/data:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id from the client list.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getTrainerClientData
+      summary: Read a client's data (read only)
+      description: |
+        The part of the client's document that the client opened: `history` or `stats` give workouts and
+        custom exercises, `measures` gives body weight and measurements. Never photos, the AI coach, settings
+        or any id of the client. The link, its grants and the trainer role are checked on every call, so
+        an ended link answers `404 client-gone` at once; so does another trainer's link id. 30 reads a
+        minute per trainer.
+      responses:
+        '200':
+          description: The client's data.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  linkId: { type: string }
+                  name: { type: string }
+                  since: { type: string, format: date-time }
+                  grants: { $ref: '#/components/schemas/TrainerGrants' }
+                  data: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
+        '404':
+          description: 'No such active link for the caller (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503':
+          description: 'The client''s file cannot be read (`unreadable`).'
+
+  /api/trainer/links/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    delete:
+      tags: [data]
+      operationId: endTrainerLink
+      summary: End a trainer link
+      description: |
+        Either side can, at any time; the trainer loses access at once. The client's data was never copied
+        and stays with the client; what the trainer already saw cannot be taken back.
+      responses:
+        '200':
+          description: Ended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ok' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'No active link of the caller with that id (`link-gone`).'
+
 components:
   securitySchemes:
     cookieAuth:
@@ -3648,6 +3979,14 @@ components:
       type: object
       properties:
         ok: { type: boolean, const: true }
+
+    TrainerGrants:
+      type: object
+      description: What a client opened to the trainer. Photos and the AI coach chat cannot be opened. `stats` needs `history`.
+      properties:
+        history: { type: boolean }
+        measures: { type: boolean }
+        stats: { type: boolean }
 
     PasskeyList:
       type: object

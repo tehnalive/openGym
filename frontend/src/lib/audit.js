@@ -79,7 +79,17 @@ const LABELS = {
   // Photos and videos of custom exercises: "Reset everything" clearing a profile's files, and the
   // upload or clean-up throttle pausing a profile (`msg` says which).
   'media.sweep': 'Cleared unused photos and videos',
-  'media.throttled': 'Too many photo or video requests'
+  'media.throttled': 'Too many photo or video requests',
+  // Trainer mode (TG14): who may read whose history. `tname` is the other side; no values are logged.
+  'trainer.enable': 'Turned on the trainer role',
+  'trainer.disable': 'Turned off the trainer role',
+  'trainer.invite.create': 'Made a client invitation',
+  'trainer.invite.revoke': 'Revoked a client invitation',
+  'trainer.invite.accept': 'Accepted a trainer and opened their data to them',
+  'trainer.invite.fail': 'A trainer invitation was refused',
+  'trainer.read': 'Trainer opened a client's data',
+  'trainer.link.revoke': 'Ended a trainer link',
+  'trainer.denied': 'Trainer blocked from a client's data'
 }
 // An unknown event is shown raw rather than dropped or rendered as "undefined": a dashboard
 // that is one version behind the server should still say *something* truthful.
@@ -114,6 +124,15 @@ const REASONS = {
   'signup': 'wrong invite codes on password signup',
   'link': 'wrong one-time device codes',
   'email': 'e-mail addresses already in use',
+  // Why a `trainer.invite.fail` or `trainer.denied` was refused.
+  'client-limit': 'the trainer already has the most clients allowed',
+  'coach-full': 'the trainer has no free places',
+  'invite-gone': 'wrong or revoked invitation',
+  'invite-used': 'the invitation was already used',
+  'invite-expired': 'the invitation expired',
+  'self-invite': 'the trainer opened their own invitation',
+  'has-trainer': 'the person already has a trainer',
+  'no-link': 'no active link with that client',
   // What a `media.throttled` pause was for.
   'upload': 'photo and video uploads',
   'sweep': 'clearing unused photos and videos'

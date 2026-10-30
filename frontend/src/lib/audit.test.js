@@ -11,7 +11,7 @@ const SERVER = readFileSync(new URL('../../../api/server.js', import.meta.url), 
 // Every quoted auth./admin./media. name, not only `audit(req, '…'`: a name with a hyphen
 // ('admin.first-user') or one picked by a ternary slipped past that pattern and reached the
 // dashboard raw.
-const EVENTS = [...new Set([...SERVER.matchAll(/['"`]((?:auth|admin|media)\.[a-z0-9.-]+)['"`]/g)].map(m => m[1]))]
+const EVENTS = [...new Set([...SERVER.matchAll(/['"`]((?:auth|admin|media|trainer)\.[a-z0-9.-]+)['"`]/g)].map(m => m[1]))]
 const REASONS = [...new Set([...SERVER.matchAll(/msg: '([a-z-]+)'/g)].map(m => m[1]))]
 
 describe('auditLabel', () => {
