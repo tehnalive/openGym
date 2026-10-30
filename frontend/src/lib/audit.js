@@ -87,9 +87,9 @@ const LABELS = {
   'trainer.invite.revoke': 'Revoked a client invitation',
   'trainer.invite.accept': 'Accepted a trainer and opened their data to them',
   'trainer.invite.fail': 'A trainer invitation was refused',
-  'trainer.read': 'Trainer opened a client's data',
+  'trainer.read': "Trainer opened a client's data",
   'trainer.link.revoke': 'Ended a trainer link',
-  'trainer.denied': 'Trainer blocked from a client's data'
+  'trainer.denied': "Trainer blocked from a client's data"
 }
 // An unknown event is shown raw rather than dropped or rendered as "undefined": a dashboard
 // that is one version behind the server should still say *something* truthful.

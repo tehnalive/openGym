@@ -45,6 +45,7 @@ import Login from './views/Login.jsx'
 import MobileOnboarding from './views/MobileOnboarding.jsx'
 import PermissionSteps from './views/PermissionSteps.jsx'
 import SharedPlanGate from './components/SharedPlan.jsx'
+import TrainerConsentGate from './components/TrainerConsent.jsx'
 import FirstRunOnboarding, { needsFirstRunOnboarding as needsFirstRun } from './views/FirstRunOnboarding.jsx'
 import Home from './views/Home.jsx'
 import Plan from './views/Plan.jsx'
@@ -78,6 +79,8 @@ const Stats = lazyView(() => import('./views/Stats.jsx'))
 const History = lazyView(() => import('./views/History.jsx'))
 const Library = lazyView(() => import('./views/Library.jsx'))
 const Muscles = lazyView(() => import('./views/Muscles.jsx'))
+const TrainerHome = lazyView(() => import('./views/TrainerHome.jsx'))
+const TrainerClient = lazyView(() => import('./views/TrainerClient.jsx'))
 const SettingsRoute = lazyView(() => import('./views/Settings.jsx').then(m => ({ default: m.SettingsRoute })))
 let viewsPrefetched = false
 const prefetchViews = () => {
@@ -306,6 +309,8 @@ function Shell() {
       <Route path="/structural-balance" element={<StructuralBalance />} />
       <Route path="/progress-photos" element={<Navigate to="/stats" replace />} />
       <Route path="/measurements" element={<Measurements />} />
+      <Route path="/trainer" element={<TrainerHome />} />
+      <Route path="/trainer/:linkId" element={<TrainerClient />} />
       <Route path="/settings" element={<SettingsRoute />} />
       <Route path="/settings/:page" element={<SettingsRoute />} />
       {/* The Coach screens gate themselves on the instance config; the routes exist
@@ -338,6 +343,8 @@ function Shell() {
       <SyncBanner />
       {/* A plan a friend sent as a link: its preview opens once the app is past sign-in and first-run setup. */}
       <SharedPlanGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />
+      {/* A trainer's invitation (startapp=t_<token>): the consent screen opens at the same moment. */}
+      <TrainerConsentGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />
       {!noTabs && <TabBar onStart={startFlow} />}
       <RestTimer />
       <Modals />

@@ -34,6 +34,16 @@ const PRESENCE = [
   ['Telegram entry gate in App', 'frontend/src/App.jsx', 'has', "telegram && !['off', 'ready'].includes(telegram.status)"],
   ['First-run onboarding', 'frontend/src/App.jsx', 'has', 'FirstRunOnboarding'],
   ['Brand: Жимолость in the manifest', 'frontend/public/manifest.json', 'has', '"name": "Жимолость"'],
+  ['Trainer mode: client data route', 'api/server.js', 'has', "'GET /api/trainer/clients/{id}/data'"],
+  ['Trainer mode: read only filter', 'api/trainer.js', 'has', 'export function trimForTrainer'],
+  ['Trainer mode: consent needs the 18+ box', 'api/server.js', 'has', "'POST /api/trainer/invites/accept'"],
+  ['Trainer mode: routes in openapi.yaml', 'api/openapi.yaml', 'has', '/api/trainer/clients/{id}/data:'],
+  ['Trainer mode: API image ships trainer.js', 'api/Dockerfile', 'has', 'trainer.js'],
+  ['Trainer mode: audit labels trainer.*', 'frontend/src/lib/audit.js', 'has', "'trainer.read'"],
+  ['Trainer mode: t_ launch parameter', 'frontend/src/lib/plan-link.js', 'has', 'export const trainerTokenOf'],
+  ['Trainer mode: consent screen in App', 'frontend/src/App.jsx', 'has', 'TrainerConsentGate'],
+  ['Trainer mode: cabinet routes in App', 'frontend/src/App.jsx', 'has', '/trainer/:linkId'],
+  ['Trainer mode: settings card', 'frontend/src/views/Settings.jsx', 'has', '<TrainerSettings />'],
   ['Removed: check-in screen', 'frontend/src/App.jsx', 'not', 'views/CheckIn.jsx'],
   ['Removed: progress photos screen', 'frontend/src/App.jsx', 'not', 'views/ProgressPhotos.jsx'],
 ]
@@ -43,9 +53,11 @@ const FRONTEND_TESTS = [
   'src/lib/kb-debug.test.js', 'src/lib/audit.test.js', 'src/lib/brand.test.js', 'src/lib/telegram.test.js',
   'src/App.telegram.test.jsx', 'src/components/ProfileAvatar.test.jsx', 'src/views/FirstRunOnboarding.test.jsx',
   'src/store/useStore.telegram.test.jsx',
+  'src/lib/trainer.test.js', 'src/components/TrainerConsent.test.jsx', 'src/views/Trainer.test.jsx', 'src/lib/plan-link.test.js',
 ]
 const API_TESTS = [
   'test/fork-routes.test.js', 'test/server-telegram-only.test.js', 'test/telegram-login.test.js', 'test/openapi-routes.test.js',
+  'test/trainer.test.js',
 ]
 
 const failures = []
