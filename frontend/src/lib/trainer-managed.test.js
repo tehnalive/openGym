@@ -83,9 +83,17 @@ describe('weightOp and measureOp', () => {
 
 describe('exportFile', () => {
   it('names the file by the client and the day, without odd characters', () => {
-    const f = exportFile({ name: 'Мама / Лена', data: {} }, new Date(2026, 9, 30))
+    const f = exportFile({ name: 'Мама / Лена', data: { unit: 'kg', workouts: [] } }, new Date(2026, 9, 30))
     expect(f.name).toBe('zhimolost-Мама-Лена-2026-10-30.json')
-    expect(JSON.parse(f.text).name).toBe('Мама / Лена')
     expect(exportFile({}, new Date(2026, 9, 30)).name).toBe('zhimolost-podopechny-2026-10-30.json')
+  })
+
+  it('is the diary in the shape of the app own backup, so Settings → import takes it', async () => {
+    const data = { unit: 'lb', workouts: [{ id: 'w1', d: '2026-10-20', entries: [] }], bodyweight: [{ d: '2026-10-19', w: 150 }] }
+    const body = JSON.parse(exportFile({ name: 'Дед', data }).text)
+    expect(body).toEqual({ routines: [], ...data })
+    const { readBackupFile } = await import('./backup-media.js')
+    const read = await readBackupFile(new File([exportFile({ name: 'Дед', data }).text], 'd.json', { type: 'application/json' }))
+    expect(read.state.workouts).toHaveLength(1)
   })
 })

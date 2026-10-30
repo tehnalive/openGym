@@ -119,7 +119,7 @@ export default function TrainerManaged() {
       </>}
       {tab === 'stats' && <Muscles view={view} />}
       <div className="dim small" style={{ margin: '18px 0 8px', lineHeight: 1.4 }}>
-        У подопечного нет Telegram, поэтому дневник хранится на сервере под вашей ответственностью. Вы можете скачать его в любой момент и удалить целиком.
+        У подопечного нет Telegram, поэтому дневник хранится на сервере под вашей ответственностью. Вы можете скачать его в любой момент и удалить целиком. Когда у подопечного появится свой аккаунт, он загрузит этот файл в приложении: Настройки → Импорт копии.
       </div>
       <button className="btn" style={{ marginBottom: 8 }} onClick={exportData}>Скачать данные подопечного</button>
       <button className="btn danger" onClick={removeClient}>Удалить подопечного</button>

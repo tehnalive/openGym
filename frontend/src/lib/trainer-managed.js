@@ -95,8 +95,10 @@ export function measureOp(date, values) {
   return { op: { op: 'measurement.set', d: date, values: out } }
 }
 
-/** The export as a file the trainer can save: its name and text. */
+/** The export as a file the trainer can save: its name and text. The text is the diary itself in the form of the
+ *  app's own backup (workouts, routines, body weight, measurements), so the person can load it in Settings → import
+ *  once they have the app on a Telegram account of their own. */
 export function exportFile(res, now = new Date()) {
   const safe = String(res?.name || 'podopechny').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 30) || 'podopechny'
-  return { name: `zhimolost-${safe}-${todayIso(now)}.json`, text: JSON.stringify(res, null, 2) }
+  return { name: `zhimolost-${safe}-${todayIso(now)}.json`, text: JSON.stringify({ routines: [], ...(res?.data || {}) }, null, 2) }
 }

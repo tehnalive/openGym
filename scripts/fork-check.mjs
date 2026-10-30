@@ -43,6 +43,11 @@ const PRESENCE = [
   ['Trainer mode: t_ launch parameter', 'frontend/src/lib/plan-link.js', 'has', 'export const trainerTokenOf'],
   ['Trainer mode: consent screen in App', 'frontend/src/App.jsx', 'has', 'TrainerConsentGate'],
   ['Trainer mode: cabinet routes in App', 'frontend/src/App.jsx', 'has', '/trainer/:linkId'],
+  ['Trainer mode: managed clients have no session', 'api/server.js', 'has', 'if (isManaged(user)) return null;'],
+  ['Trainer mode: managed clients write through commitState', 'api/server.js', 'has', 'commitState(t.client,'],
+  ['Trainer mode: API image ships trainer-managed.js', 'api/Dockerfile', 'has', 'trainer-managed.js'],
+  ['Trainer mode: managed routes in openapi.yaml', 'api/openapi.yaml', 'has', '/api/trainer/managed/{id}/ops:'],
+  ['Trainer mode: managed client screen route', 'frontend/src/App.jsx', 'has', '/trainer/m/:linkId'],
   ['Trainer mode: settings card', 'frontend/src/views/Settings.jsx', 'has', '<TrainerSettings />'],
   ['Removed: check-in screen', 'frontend/src/App.jsx', 'not', 'views/CheckIn.jsx'],
   ['Removed: progress photos screen', 'frontend/src/App.jsx', 'not', 'views/ProgressPhotos.jsx'],
@@ -54,10 +59,11 @@ const FRONTEND_TESTS = [
   'src/App.telegram.test.jsx', 'src/components/ProfileAvatar.test.jsx', 'src/views/FirstRunOnboarding.test.jsx',
   'src/store/useStore.telegram.test.jsx',
   'src/lib/trainer.test.js', 'src/components/TrainerConsent.test.jsx', 'src/views/Trainer.test.jsx', 'src/lib/plan-link.test.js',
+  'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx',
 ]
 const API_TESTS = [
   'test/fork-routes.test.js', 'test/server-telegram-only.test.js', 'test/telegram-login.test.js', 'test/openapi-routes.test.js',
-  'test/trainer.test.js',
+  'test/trainer.test.js', 'test/trainer-managed.test.js',
 ]
 
 const failures = []

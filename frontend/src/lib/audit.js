@@ -138,6 +138,7 @@ const REASONS = {
   'self-invite': 'the trainer opened their own invitation',
   'has-trainer': 'the person already has a trainer',
   'no-link': 'no active link with that client',
+  'no-managed-link': 'no managed client of the trainer with that id',
   // What a `media.throttled` pause was for.
   'upload': 'photo and video uploads',
   'sweep': 'clearing unused photos and videos'
