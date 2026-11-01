@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
-import { managedInfo, leaveManagedMode, enterManagedMode } from '../lib/managed-mode.js'
+import { managedInfo, leaveManagedMode, enterManagedMode, enterReadonlyMode, isReadonlyMode } from '../lib/managed-mode.js'
 import { effectiveLang } from '../lib/default-lang.js'
 import { confirmSheet } from '../sheets.jsx'
 
@@ -13,9 +13,17 @@ export function openManagedDiary(id, name) {
   return enterManagedMode(id, name, effectiveLang(S, config))
 }
 
+/** Open a Telegram client's diary read only, in the language the app of the trainer speaks now. */
+export function openReadonlyDiary(id, name, grants) {
+  const { S, config } = useStore.getState()
+  return enterReadonlyMode(id, name, effectiveLang(S, config), grants)
+}
+
 /** Back to the cabinet, without losing anything quietly: what is owed is sent first, a workout that is
  *  still running is named before leaving it (it stays on this device, in this diary, and is there on return). */
 export async function leaveManagedDiary() {
+  // Nothing is written in a read only diary, so there is nothing to send or to lose.
+  if (isReadonlyMode()) { leaveManagedMode(); return }
   const go = async () => {
     useUI.getState().toast('Сохраняем дневник…')
     try { await useStore.getState().pushState() } catch { /* the check below tells whether it landed */ }
@@ -58,7 +66,7 @@ export default function ManagedBar() {
   const trouble = !!sync && (sync.offline || sync.status === 'error' || sync.status === 'auth' || !!sync.lastError)
   const saving = !!sync && !trouble && (sync.status === 'pending' || sync.pending)
   return <div ref={ref} className="managed-bar" role="status">
-    <strong>Режим тренера · дневник: {info?.name || 'подопечного'}</strong>
+    <strong>Режим тренера · дневник: {info?.name || 'подопечного'}{isReadonlyMode() ? ' · только чтение' : ''}</strong>
     {(trouble || saving) && <span className="managed-bar-sub">{trouble ? 'Нет связи, изменения пока на устройстве' : 'Сохраняется…'}</span>}
   </div>
 }

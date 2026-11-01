@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
-const mocks = vi.hoisted(() => ({ api: vi.fn(), enter: vi.fn(() => true) }))
+const mocks = vi.hoisted(() => ({ api: vi.fn(), enter: vi.fn(() => true), enterRo: vi.fn(() => true) }))
 vi.mock('../lib/api.js', async importOriginal => ({ ...(await importOriginal()), api: mocks.api }))
 // Entering the diary reloads the page; here it is only recorded.
-vi.mock('../lib/managed-mode.js', async importOriginal => ({ ...(await importOriginal()), enterManagedMode: mocks.enter }))
+vi.mock('../lib/managed-mode.js', async importOriginal => ({ ...(await importOriginal()), enterManagedMode: mocks.enter, enterReadonlyMode: mocks.enterRo }))
 
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
@@ -206,7 +206,7 @@ describe('the week of the trainer in the cabinet', () => {
     expect(host.querySelector('[aria-label=Неделя]').textContent).toContain('Олег')
     expect(host.textContent).toMatch(/напоминание/)
     click(today.querySelector('[role=button]'))
-    expect(where(host)).toBe('/trainer/link-tg-0001')
+    expect(mocks.enterRo).toHaveBeenCalledWith('link-tg-0001', 'Мария', expect.any(String), expect.any(Object))
   })
 
   it('says what to do while nobody has days yet', async () => {

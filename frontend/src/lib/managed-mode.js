@@ -29,16 +29,30 @@ const FOREIGN = /^__telegram__/
 
 let info = null
 export const isManagedMode = () => info !== null
+/** A Telegram client's diary opened read only: nothing in it can be written, and the screens have no writing controls. */
+export const isReadonlyMode = () => info !== null && info.kind === 'readonly'
+/** What the client opened (history, measures, stats) in a read only diary; everything for a managed one. */
+export const diaryGrants = () => (info && info.kind === 'readonly' ? info.grants : { history: true, measures: true, stats: true })
 export const managedInfo = () => info
 export const managedUserId = id => 'managed-' + id
 
 /* ------------------------------------------------------------------------------------ the flag */
 
+const KINDS = ['managed', 'readonly']
+const GRANT_KEYS = ['history', 'measures', 'stats']
+const cleanGrants = g => Object.fromEntries(GRANT_KEYS.map(k => [k, !!(g && g[k] === true)]))
+
 function parseFlag(raw) {
   try {
     const v = JSON.parse(raw)
     if (v && typeof v.id === 'string' && ID_RE.test(v.id)) {
-      return { id: v.id, name: typeof v.name === 'string' ? v.name.slice(0, 40) : '', lang: typeof v.lang === 'string' && /^[A-Za-z-]{2,10}$/.test(v.lang) ? v.lang : '' }
+      const kind = KINDS.includes(v.kind) ? v.kind : 'managed'
+      return {
+        id: v.id, name: typeof v.name === 'string' ? v.name.slice(0, 40) : '', kind,
+        lang: typeof v.lang === 'string' && /^[A-Za-z-]{2,10}$/.test(v.lang) ? v.lang : '',
+        // What the client opened for the trainer; only a read only diary has it.
+        ...(kind === 'readonly' ? { grants: cleanGrants(v.grants) } : {}),
+      }
     }
   } catch { /* no flag */ }
   return null
@@ -56,7 +70,8 @@ export function detect(win) {
   let stored = null
   try { stored = parseFlag(ss.getItem(FLAG)) } catch { /* unreadable: not managed */ }
   const asId = new URLSearchParams(win.location.search).get('as')
-  const found = asId && ID_RE.test(asId) ? { id: asId, name: stored && stored.id === asId ? stored.name : '', lang: stored && stored.id === asId ? stored.lang : '' } : stored
+  // The parameter only names the diary; what kind it is, whose language and which grants come from the flag the cabinet wrote.
+  const found = asId && ID_RE.test(asId) ? (stored && stored.id === asId ? stored : { id: asId, name: '', kind: 'managed', lang: '' }) : stored
   if (asId) {
     // The parameter is only a way in: it comes off the address so a reload or a shared link does not carry it.
     try {
@@ -78,6 +93,15 @@ export const shownLang = (i, fallback) => (i && i.lang) || fallback
 export function enterManagedMode(id, name, lang, win = window) {
   if (!ID_RE.test(String(id))) return false
   try { win.sessionStorage.setItem(FLAG, JSON.stringify({ id, name: String(name || '').slice(0, 40), lang: typeof lang === 'string' ? lang : '' })) } catch { return false }
+  win.location.assign(baseOf(win.location) + '?as=' + encodeURIComponent(id) + '#/home')
+  return true
+}
+
+/** From the cabinet: open a client who signed in with Telegram, read only, as the app. `grants` is what the client opened. */
+export function enterReadonlyMode(id, name, lang, grants, win = window) {
+  if (!ID_RE.test(String(id))) return false
+  const flag = { id, name: String(name || '').slice(0, 40), kind: 'readonly', lang: typeof lang === 'string' ? lang : '', grants: cleanGrants(grants) }
+  try { win.sessionStorage.setItem(FLAG, JSON.stringify(flag)) } catch { return false }
   win.location.assign(baseOf(win.location) + '?as=' + encodeURIComponent(id) + '#/home')
   return true
 }
@@ -105,11 +129,19 @@ export function takeManagedNotice(win = window) {
 
 const dataBase = id => `/api/trainer/managed/${id}/data`
 
-/** What to do with one request. `path` has no query; `search` is the query with its "?" or empty. */
-export function routeFor(method, path, search, id) {
+/** What to do with one request. `path` has no query; `search` is the query with its "?" or empty. `mode` is the kind of
+ *  diary: a managed client's, or a Telegram client's read only (its document is read from another route, and a push of it
+ *  is answered here, as stored, without a request: there is nothing to write). */
+export function routeFor(method, path, search, id, mode = 'managed') {
   const m = String(method || 'GET').toUpperCase()
   if (m === 'GET' && path === '/api/config') return { kind: 'config' }
   if (m === 'GET' && path === '/api/me') return { kind: 'me' }
+  if (mode === 'readonly') {
+    if (m === 'GET' && path === '/api/data') return { kind: 'rewrite', path: `/api/trainer/clients/${id}/doc`, search, track: true }
+    if (m === 'GET' && path === '/api/data/rev') return { kind: 'rewrite', path: `/api/trainer/clients/${id}/doc/rev`, search, track: true }
+    if (m === 'PUT' && path === '/api/data') return { kind: 'swallow' }
+    return { kind: 'block' }
+  }
   if (path === '/api/data' && (m === 'GET' || m === 'PUT')) return { kind: 'rewrite', path: dataBase(id), search }
   if (m === 'GET' && path === '/api/data/rev') return { kind: 'rewrite', path: dataBase(id) + '/rev', search }
   // The two things the trainer does with this client's data from its settings: a copy, and deleting the diary. Only
@@ -143,15 +175,17 @@ export function apiPathOf(rawUrl, win) {
 
 function guardFetch(win, i) {
   const real = win.fetch.bind(win)
+  const seen = { rev: 0, wid: '' }
   win.fetch = function managedFetch(input, init) {
     const isReq = typeof Request !== 'undefined' && input instanceof Request
     const target = apiPathOf(isReq ? input.url : String(input), win)
     if (!target) return real(input, init)
     const method = (init && init.method) || (isReq ? input.method : 'GET')
-    const r = routeFor(method, target.path, target.search, i.id)
+    const r = routeFor(method, target.path, target.search, i.id, i.kind || 'managed')
     if (r.kind === 'block') return Promise.resolve(blockedAnswer())
     if (r.kind === 'me') return Promise.resolve(meAnswer(i))
     if (r.kind === 'pass') return real(input, init)
+    if (r.kind === 'swallow') return Promise.resolve(json(200, { ok: true, rev: seen.rev, ...(seen.wid ? { wid: seen.wid } : {}), ts: null }))
     if (r.kind === 'config') {
       return real(input, init).then(async res => {
         let cfg = null
@@ -165,7 +199,9 @@ function guardFetch(win, i) {
     headers.delete('x-opengym-user')
     const next = { ...(init || {}), method, headers, credentials: 'same-origin' }
     if (isReq && !(init && init.body) && method !== 'GET' && method !== 'HEAD') next.body = input.clone().body
-    return real(target.base + r.path + r.search, next)
+    const answer = real(target.base + r.path + r.search, next)
+    // A read only diary remembers the revision the server has, to answer its own pushes with it (see 'swallow').
+    return r.track ? answer.then(res => { res.clone().json().then(b => { if (b && Number.isFinite(b.rev)) { seen.rev = b.rev; seen.wid = typeof b.wid === 'string' ? b.wid : seen.wid } }).catch(() => {}); return res }) : answer
   }
 }
 

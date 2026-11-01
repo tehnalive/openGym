@@ -53,6 +53,8 @@ const PRESENCE = [
   ['Managed diary: not a Telegram launch', 'frontend/src/lib/telegram.js', 'has', 'if (isManagedMode()) return false'],
   ['Managed diary: bar and routes in App', 'frontend/src/App.jsx', 'has', '<ManagedBar />'],
   ['Managed diary: no exercise library tab', 'frontend/src/components/TabBar.jsx', 'has', 'isManagedMode()'],
+  ['Read only diary: client document route', 'api/openapi.yaml', 'has', '/api/trainer/clients/{id}/doc:'],
+  ['Read only diary: routes in App', 'frontend/src/App.jsx', 'has', 'readonlyRoutes'],
   ['Trainer mode: settings card', 'frontend/src/views/Settings.jsx', 'has', '<TrainerSettings />'],
   ['Removed: check-in screen', 'frontend/src/App.jsx', 'not', 'views/CheckIn.jsx'],
   ['Removed: progress photos screen', 'frontend/src/App.jsx', 'not', 'views/ProgressPhotos.jsx'],
@@ -64,7 +66,7 @@ const FRONTEND_TESTS = [
   'src/App.telegram.test.jsx', 'src/components/ProfileAvatar.test.jsx', 'src/views/FirstRunOnboarding.test.jsx',
   'src/store/useStore.telegram.test.jsx',
   'src/lib/trainer.test.js', 'src/components/TrainerConsent.test.jsx', 'src/views/Trainer.test.jsx', 'src/lib/plan-link.test.js',
-  'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx', 'src/lib/managed-mode.test.js', 'src/components/ManagedBar.test.jsx',
+  'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx', 'src/lib/managed-mode.test.js', 'src/components/ManagedBar.test.jsx', 'src/views/ReadonlyDiary.test.jsx',
 ]
 const API_TESTS = [
   'test/fork-routes.test.js', 'test/server-telegram-only.test.js', 'test/telegram-login.test.js', 'test/openapi-routes.test.js',

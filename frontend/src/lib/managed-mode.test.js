@@ -1,7 +1,7 @@
 // Managed mode (TG14): the trainer's app opened in a client's name must not touch the trainer's own storage and
 // must not reach any API route but the client's diary. Run against a fake window, so the guards are the real ones.
 import { describe, it, expect, vi } from 'vitest'
-import { shownLang, routeFor, scoped, detect, installManagedGuards, apiPathOf, managedConfig, enterManagedMode, leaveManagedMode, takeManagedNotice, MANAGED_PREFIX } from './managed-mode.js'
+import { enterReadonlyMode, shownLang, routeFor, scoped, detect, installManagedGuards, apiPathOf, managedConfig, enterManagedMode, leaveManagedMode, takeManagedNotice, MANAGED_PREFIX } from './managed-mode.js'
 
 const ID = 'gDzEuZgmpoBd'
 
@@ -210,12 +210,12 @@ describe('the language of the diary', () => {
 describe('entering and leaving', () => {
   it('detect() takes ?as= once, keeps the flag, and ignores a bad id', () => {
     const win = fakeWindow({ href: `https://gym.example/?as=${ID}#/home` })
-    expect(detect(win)).toEqual({ id: ID, name: '', lang: '' })
+    expect(detect(win)).toEqual({ id: ID, name: '', kind: 'managed', lang: '' })
     expect(JSON.parse(win.sessionStorage.getItem('gym_as')).id).toBe(ID)
     expect(win.history.replaceState).toHaveBeenCalled()
     expect(win.history.replaceState.mock.calls[0][2]).toBe('/#/home')
     const again = fakeWindow(); again.sessionStorage.setItem('gym_as', JSON.stringify({ id: ID, name: 'Мама', lang: 'ru' }))
-    expect(detect(again)).toEqual({ id: ID, name: 'Мама', lang: 'ru' })
+    expect(detect(again)).toEqual({ id: ID, name: 'Мама', kind: 'managed', lang: 'ru' })
     // A language that is not a tag is dropped, not trusted.
     const odd = fakeWindow(); odd.sessionStorage.setItem('gym_as', JSON.stringify({ id: ID, name: 'x', lang: '<script>' }))
     expect(detect(odd).lang).toBe('')
@@ -236,5 +236,54 @@ describe('entering and leaving', () => {
     expect(win.location.assign).toHaveBeenLastCalledWith('/app/?m=out#/trainer')
     expect(takeManagedNotice(win)).toBe('Не открылось')
     expect(takeManagedNotice(win)).toBe('')
+  })
+})
+
+describe('a Telegram client read only', () => {
+  const RO = { id: ID, name: 'Мария', kind: 'readonly', grants: { history: true, measures: false, stats: false } }
+
+  it('reads the document and the revision from the client routes, and answers a push itself', () => {
+    expect(routeFor('GET', '/api/data', '', ID, 'readonly')).toEqual({ kind: 'rewrite', path: `/api/trainer/clients/${ID}/doc`, search: '', track: true })
+    expect(routeFor('GET', '/api/data/rev', '', ID, 'readonly').path).toBe(`/api/trainer/clients/${ID}/doc/rev`)
+    expect(routeFor('PUT', '/api/data', '', ID, 'readonly')).toEqual({ kind: 'swallow' })
+    for (const [m, p] of [['POST', '/api/data'], ['DELETE', '/api/data'], ['GET', `/api/trainer/managed/${ID}/export`], ['DELETE', `/api/trainer/managed/${ID}`],
+      ['POST', '/api/telegram/login'], ['PUT', `/api/trainer/managed/${ID}/data`], ['POST', '/api/push/subscribe'], ['PUT', `/api/trainer/clients/${ID}/doc`]]) {
+      expect(routeFor(m, p, '', ID, 'readonly').kind, m + ' ' + p).toBe('block')
+    }
+  })
+
+  it('sends not one write to the server: a push is answered locally with the revision the server has', async () => {
+    const real = vi.fn(async url => new Response(JSON.stringify(String(url).endsWith('/doc') ? { state: { workouts: [] }, rev: 7 } : { rev: 7, wid: 'w7' })))
+    const win = fakeWindow({ fetchImpl: real })
+    installManagedGuards(win, RO)
+    await win.fetch('/api/data')
+    expect(real.mock.calls[0][0]).toBe(`/api/trainer/clients/${ID}/doc`)
+    await new Promise(r => setTimeout(r, 0))
+    const put = await jsonOf(await win.fetch('/api/data', { method: 'PUT', body: '{"state":{"workouts":[1]}}', headers: { 'X-OpenGym-User': 'x' } }))
+    expect(put.status).toBe(200)
+    expect(put.body).toMatchObject({ ok: true, rev: 7 })
+    expect(real).toHaveBeenCalledTimes(1)
+    // Every other call is refused here too, and the storage is the prefixed one.
+    for (const [path, init] of [['/api/telegram/login', { method: 'POST' }], ['/api/shares', { method: 'POST' }], [`/api/trainer/managed/${ID}/ops`, { method: 'POST' }]]) {
+      expect((await win.fetch(path, init)).status).toBe(403)
+    }
+    expect(real).toHaveBeenCalledTimes(1)
+    win.localStorage.setItem('gym_state_v1', 'x')
+    expect(win.localStorage.m.has(MANAGED_PREFIX(ID) + 'gym_state_v1')).toBe(true)
+    expect(win.localStorage.m.has('gym_state_v1')).toBe(false)
+  })
+
+  it('keeps the kind and the grants in the flag, and drops what is not a grant', () => {
+    const win = fakeWindow()
+    expect(enterReadonlyMode(ID, 'Мария', 'ru', { history: true, measures: 'yes', stats: false, extra: true }, win)).toBe(true)
+    expect(JSON.parse(win.sessionStorage.getItem('gym_as'))).toEqual({ id: ID, name: 'Мария', kind: 'readonly', lang: 'ru', grants: { history: true, measures: false, stats: false } })
+    expect(win.location.assign).toHaveBeenLastCalledWith(`/?as=${ID}#/home`)
+    expect(enterReadonlyMode('bad id', 'x', 'ru', {}, win)).toBe(false)
+    const again = fakeWindow({ href: `https://gym.example/?as=${ID}#/home` })
+    again.sessionStorage.setItem('gym_as', win.sessionStorage.getItem('gym_as'))
+    expect(detect(again)).toEqual({ id: ID, name: 'Мария', kind: 'readonly', lang: 'ru', grants: { history: true, measures: false, stats: false } })
+    // A flag with an unknown kind is a managed diary, not a way around anything.
+    const odd = fakeWindow(); odd.sessionStorage.setItem('gym_as', JSON.stringify({ id: ID, name: 'x', kind: 'admin' }))
+    expect(detect(odd).kind).toBe('managed')
   })
 })

@@ -6,7 +6,7 @@ import { t } from '../lib/i18n.js'
 import Icon from './Icon.jsx'
 import Elapsed from './Elapsed.jsx'
 import { useConnectionTrouble } from './SyncBanner.jsx'
-import { isManagedMode } from '../lib/managed-mode.js'
+import { isManagedMode, isReadonlyMode, diaryGrants } from '../lib/managed-mode.js'
 import { leaveManagedDiary } from './ManagedBar.jsx'
 
 // Module scope, not TabBar's render body. Declared inside it, `Tab` was a new function on every
@@ -52,6 +52,19 @@ export default function TabBar({ onStart }) {
     nav('/workout')
   }
 
+  // A Telegram client's diary read only: no Start button, no plan, no library; the sections the client opened, and the way back.
+  if (isReadonlyMode()) {
+    const g = diaryGrants()
+    return (
+      <nav id="tabbar">
+        <Tab active={cur === 'home'} icon="house" label={t('Home')} onClick={() => switchTab('/home')} />
+        {g.history && <Tab active={cur === 'history'} icon="history" label="История" onClick={() => switchTab('/history')} />}
+        {g.stats && <Tab active={cur === 'stats'} icon="chart" label={t('Stats')} onClick={() => switchTab('/stats')} />}
+        {g.measures && <Tab active={cur === 'measurements'} icon="scale" label="Замеры" onClick={() => switchTab('/measurements')} />}
+        <Tab active={false} icon="chevronLeft" label="К подопечным" onClick={leaveManagedDiary} />
+      </nav>
+    )
+  }
   return (
     <nav id="tabbar">
       <Tab active={on('home')} icon="house" label={t('Home')} dot={trouble} onClick={() => switchTab('/home')} />

@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
-const mocks = vi.hoisted(() => ({ api: vi.fn() }))
+const mocks = vi.hoisted(() => ({ api: vi.fn(), enterRo: vi.fn(() => true) }))
 vi.mock('../lib/api.js', async importOriginal => ({ ...(await importOriginal()), api: mocks.api }))
+// Opening a client reloads the page in read only mode; here it is only recorded.
+vi.mock('../lib/managed-mode.js', async importOriginal => ({ ...(await importOriginal()), enterReadonlyMode: mocks.enterRo }))
 
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
@@ -63,6 +65,10 @@ describe('TrainerHome', () => {
     expect(host.textContent).toContain('3 трен.')
     expect(host.textContent).toContain('Открыто: замеры и вес')   // no history grant: no history facts
     click([...host.querySelectorAll('.item')].find(x => x.textContent.includes('Вася')))
+    // The client opens as the app, read only, with what they opened; the classic screen is the gear on the row.
+    expect(mocks.enterRo).toHaveBeenCalledWith('link-aaaa-1', 'Вася', expect.any(String), expect.objectContaining({ history: expect.any(Boolean) }))
+    expect(where(host)).toBe('/trainer')
+    click(host.querySelector('[aria-label="Классический вид: Вася"]'))
     expect(where(host)).toBe('/trainer/link-aaaa-1')
   })
 

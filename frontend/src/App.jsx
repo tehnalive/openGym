@@ -29,7 +29,7 @@ import { installViewportGuard } from './lib/viewport-guard.js'
 import { installChipDrag } from './lib/hchips.js'
 import { syncPushSubscription } from './lib/push.js'
 import { MOBILE, nativePlatform } from './lib/mobile.js'
-import { isManagedMode, managedInfo, shownLang, leaveManagedMode } from './lib/managed-mode.js'
+import { isManagedMode, isReadonlyMode, managedInfo, shownLang, leaveManagedMode } from './lib/managed-mode.js'
 import { loadTelegram, prepareTelegram } from './lib/telegram.js'
 import { DEMO } from './lib/demo.js'
 import { exitWorkoutEdit, startFlow, beginWorkout } from './sheets.jsx'
@@ -86,6 +86,10 @@ const Muscles = lazyView(() => import('./views/Muscles.jsx'))
 const TrainerHome = lazyView(() => import('./views/TrainerHome.jsx'))
 const TrainerClient = lazyView(() => import('./views/TrainerClient.jsx'))
 const TrainerManaged = lazyView(() => import('./views/TrainerManaged.jsx'))
+const ReadonlyHome = lazyView(() => import('./views/ReadonlyDiary.jsx').then(m => ({ default: m.ReadonlyHome })))
+const ReadonlyHistory = lazyView(() => import('./views/ReadonlyDiary.jsx').then(m => ({ default: m.ReadonlyHistory })))
+const ReadonlyMeasures = lazyView(() => import('./views/ReadonlyDiary.jsx').then(m => ({ default: m.ReadonlyMeasures })))
+const ReadonlyStats = lazyView(() => import('./views/ReadonlyDiary.jsx').then(m => ({ default: m.ReadonlyStats })))
 const ManagedSettings = lazyView(() => import('./views/ManagedSettings.jsx'))
 const SettingsRoute = lazyView(() => import('./views/Settings.jsx').then(m => ({ default: m.SettingsRoute })))
 let viewsPrefetched = false
@@ -306,6 +310,17 @@ function Shell() {
     </div>
   )
 
+  // A Telegram client's diary opened read only: the same shell, and only the screens that read. No Start, Plan,
+  // workout, exercise library or settings route exists here, so nothing can be reached that would write.
+  const readonlyRoutes = l => (
+    <Routes location={l}>
+      <Route path="/home" element={<ReadonlyHome />} />
+      <Route path="/history" element={<ReadonlyHistory />} />
+      <Route path="/measurements" element={<ReadonlyMeasures />} />
+      <Route path="/stats" element={<ReadonlyStats />} />
+      <Route path="*" element={<Navigate to="/home" replace />} />
+    </Routes>
+  )
   const managedRoutes = l => (
     <Routes location={l}>
       <Route path="/home" element={<Home />} />
@@ -322,7 +337,7 @@ function Shell() {
       <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
   )
-  const view = l => (!authed ? (managed ? <ManagedEnded /> : <Login />) : managed ? managedRoutes(l) : needsMobileOnboarding ? <MobileOnboarding /> : permSteps ? <PermissionSteps /> : needsFirstRunOnboarding ? <FirstRunOnboarding onFinish={() => setFirstRunPreview(false)} /> : (
+  const view = l => (!authed ? (managed ? <ManagedEnded /> : <Login />) : managed ? (isReadonlyMode() ? readonlyRoutes(l) : managedRoutes(l)) : needsMobileOnboarding ? <MobileOnboarding /> : permSteps ? <PermissionSteps /> : needsFirstRunOnboarding ? <FirstRunOnboarding onFinish={() => setFirstRunPreview(false)} /> : (
     <Routes location={l}>
       <Route path="/home" element={<Home />} />
       <Route path="/plan" element={<Plan />} />

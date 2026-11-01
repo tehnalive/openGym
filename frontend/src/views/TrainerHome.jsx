@@ -7,14 +7,18 @@ import { trainerApi, errorText, grantsText, daysSince, ago, scheduleText, client
 import { scheduleSheet } from '../components/TrainerSchedule.jsx'
 import { sendLink, copyLink } from '../lib/plan-link.js'
 import { takeManagedNotice } from '../lib/managed-mode.js'
-import { openManagedDiary } from '../components/ManagedBar.jsx'
+import { openManagedDiary, openReadonlyDiary } from '../components/ManagedBar.jsx'
 import { Button, Section, Row, Check, TextField, Segmented } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
 import ProfileAvatar from '../components/ProfileAvatar.jsx'
 
 const toast = m => useUI.getState().toast(m)
 // A Telegram client opens the read-only view; a client without Telegram opens as the ordinary app, in their name.
-const openClient = (c, nav) => { if (c.managed) openManagedDiary(c.linkId, c.name); else nav('/trainer/' + c.linkId) }
+const openClient = (c, nav) => {
+  if (c.managed) openManagedDiary(c.linkId, c.name)
+  // A Telegram client opens read only, as the app; the classic screen is the gear on the row and the way out when this fails.
+  else if (!openReadonlyDiary(c.linkId, c.name, c.grants)) nav('/trainer/' + c.linkId)
+}
 const inviteText = 'Приглашаю вас в Жимолость: откройте ссылку, и я смогу смотреть ваш дневник тренировок. Вы сами решите, что мне открыть, и сможете закрыть доступ в любой момент.'
 const when = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) }
 
@@ -109,6 +113,8 @@ export default function TrainerHome() {
           onClick={e => { e.stopPropagation(); scheduleSheet({ linkId: c.linkId, name: c.name, schedule: c.schedule, onSaved: sc => setSchedule(c.linkId, sc) }) }} onKeyDown={e => e.stopPropagation()}><Icon name="calendar" /></button>
         {c.managed && <button className="iconbtn" aria-label={'Данные подопечного: ' + c.name} title="Данные, скачать, удалить"
           onClick={e => { e.stopPropagation(); nav('/trainer/m/' + c.linkId) }} onKeyDown={e => e.stopPropagation()}><Icon name="gear" /></button>}
+        {!c.managed && <button className="iconbtn" aria-label={'Классический вид: ' + c.name} title="Классический вид и настройки"
+          onClick={e => { e.stopPropagation(); nav('/trainer/' + c.linkId) }} onKeyDown={e => e.stopPropagation()}><Icon name="gear" /></button>}
         <Icon name="chevronRight" className="chev" />
       </div>)}</div>
       : <div className="empty"><div className="ico"><Icon name="personCircle" /></div>Подопечных пока нет. Пригласите первого по ссылке.</div>)}
