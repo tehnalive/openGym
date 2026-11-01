@@ -58,7 +58,7 @@ export default function ManagedBar() {
   const trouble = !!sync && (sync.offline || sync.status === 'error' || sync.status === 'auth' || !!sync.lastError)
   const saving = !!sync && !trouble && (sync.status === 'pending' || sync.pending)
   return <div ref={ref} className="managed-bar" role="status">
-    <strong>Дневник: {info?.name || 'подопечного'}</strong>
+    <strong>Режим тренера · дневник: {info?.name || 'подопечного'}</strong>
     {(trouble || saving) && <span className="managed-bar-sub">{trouble ? 'Нет связи, изменения пока на устройстве' : 'Сохраняется…'}</span>}
   </div>
 }

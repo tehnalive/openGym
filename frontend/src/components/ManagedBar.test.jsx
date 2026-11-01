@@ -45,7 +45,7 @@ afterEach(() => { act(() => { mounted.splice(0).forEach(r => r.unmount()) }) })
 describe('the bar over a client\'s diary', () => {
   it('says whose diary it is and takes the room it needs', () => {
     const host = mount(<ManagedBar />)
-    expect(host.querySelector('.managed-bar').textContent).toContain('Дневник: Мама')
+    expect(host.querySelector('.managed-bar').textContent).toContain('Режим тренера · дневник: Мама')
     // The way back is the last tab, not a button of the bar.
     expect(host.querySelector('.managed-bar button')).toBeNull()
     expect(document.documentElement.style.getPropertyValue('--conn')).not.toBe('')
