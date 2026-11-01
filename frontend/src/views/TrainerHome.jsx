@@ -5,11 +5,13 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText, grantsText, daysSince, ago } from '../lib/trainer.js'
 import { sendLink, copyLink } from '../lib/plan-link.js'
+import { enterManagedMode, takeManagedNotice } from '../lib/managed-mode.js'
 import { Button, Section, Row, Check, TextField, Segmented } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
 
 const toast = m => useUI.getState().toast(m)
-const open = c => (c.managed ? '/trainer/m/' : '/trainer/') + c.linkId
+// A Telegram client opens the read-only view; a client without Telegram opens as the ordinary app, in their name.
+const openClient = (c, nav) => { if (c.managed) enterManagedMode(c.linkId, c.name); else nav('/trainer/' + c.linkId) }
 const inviteText = 'Приглашаю вас в Жимолость: откройте ссылку, и я смогу смотреть ваш дневник тренировок. Вы сами решите, что мне открыть, и сможете закрыть доступ в любой момент.'
 const when = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) }
 
@@ -31,6 +33,8 @@ export default function TrainerHome() {
     } catch (e) { setError(errorText(e)) }
   }, [])
   useEffect(() => { load() }, [load])
+  // Sent back from a client's diary that could not be opened (managed-mode.js): said once.
+  useEffect(() => { const n = takeManagedNotice(); if (n) toast(n) }, [])
 
   if (me && !me.trainer.enabled) return <Navigate to="/settings" replace />
 
@@ -39,7 +43,7 @@ export default function TrainerHome() {
     try {
       const made = await trainerApi.addManaged({ name: form.name, note: form.note, unit: form.unit, ageConfirmed: form.age })
       toast('Подопечный добавлен')
-      nav('/trainer/m/' + made.linkId)
+      if (!enterManagedMode(made.linkId, made.name)) nav('/trainer/m/' + made.linkId)
     } catch (e) { setError(errorText(e)) }
     finally { setBusy(false) }
   }
@@ -71,10 +75,12 @@ export default function TrainerHome() {
 
     {clients && (clients.length
       ? <div className="list">{clients.map(c => <div key={c.linkId} className="item" role="button" tabIndex={0}
-        onClick={() => nav(open(c))} onKeyDown={e => { if (e.key === 'Enter') nav(open(c)) }}>
+        onClick={() => openClient(c, nav)} onKeyDown={e => { if (e.key === 'Enter') openClient(c, nav) }}>
         <span className="lrow-i" style={{ width: 34, height: 34, borderRadius: 8 }}><Icon name="personCircle" /></span>
         <div className="grow"><div className="tt">{c.name}</div>
           <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div></div>
+        {c.managed && <button className="iconbtn" aria-label={'Данные подопечного: ' + c.name} title="Данные, скачать, удалить"
+          onClick={e => { e.stopPropagation(); nav('/trainer/m/' + c.linkId) }} onKeyDown={e => e.stopPropagation()}><Icon name="gear" /></button>}
         <Icon name="chevronRight" className="chev" />
       </div>)}</div>
       : <div className="empty"><div className="ico"><Icon name="personCircle" /></div>Подопечных пока нет. Пригласите первого по ссылке.</div>)}
@@ -85,7 +91,7 @@ export default function TrainerHome() {
       : adding === 'managed'
         ? <div className="card">
           <div className="tt" style={{ marginBottom: 6 }}>Подопечный без Telegram</div>
-          <div className="dim small" style={{ lineHeight: 1.4, marginBottom: 8 }}>Вы будете вести его дневник сами: записывать тренировки, вес и замеры. Данные хранятся на сервере, вы можете скачать их и удалить в любой момент.</div>
+          <div className="dim small" style={{ lineHeight: 1.4, marginBottom: 8 }}>Вы будете вести его дневник сами в таком же приложении, как у вас: тренировки, программа, вес и замеры. Данные хранятся на сервере, вы можете скачать их и удалить в любой момент.</div>
           <TextField value={form.name} maxLength={40} placeholder="Имя" aria-label="Имя подопечного" onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           <div style={{ height: 8 }} />
           <TextField value={form.note} maxLength={200} placeholder="Заметка (необязательно)" aria-label="Заметка" onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />

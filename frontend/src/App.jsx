@@ -11,6 +11,7 @@ import { setLang, useLang, baseLang } from './lib/i18n.js'
 import { effectiveLang } from './lib/default-lang.js'
 import { setPlayOnSilent, setVibrate, setAlarmBuzzer, setNativeBuzzer } from './lib/sound.js'
 import { buzzAsAlarm } from './lib/rest-alert.js'
+import { api } from './lib/api.js'
 import { setNav, notePath, keyBefore, navToWorkout } from './lib/nav.js'
 import { onGymReminderOpen } from './lib/gym-reminder.js'
 import { workoutVolume } from './lib/history.js'
@@ -28,10 +29,13 @@ import { installViewportGuard } from './lib/viewport-guard.js'
 import { installChipDrag } from './lib/hchips.js'
 import { syncPushSubscription } from './lib/push.js'
 import { MOBILE, nativePlatform } from './lib/mobile.js'
+import { isManagedMode, leaveManagedMode } from './lib/managed-mode.js'
+import { loadTelegram, prepareTelegram } from './lib/telegram.js'
 import { DEMO } from './lib/demo.js'
 import { exitWorkoutEdit, startFlow, beginWorkout } from './sheets.jsx'
 import Icon from './components/Icon.jsx'
 import TabBar from './components/TabBar.jsx'
+import ManagedBar, { ManagedEnded } from './components/ManagedBar.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Modals from './components/Modals.jsx'
 import Toast from './components/Toast.jsx'
@@ -82,6 +86,7 @@ const Muscles = lazyView(() => import('./views/Muscles.jsx'))
 const TrainerHome = lazyView(() => import('./views/TrainerHome.jsx'))
 const TrainerClient = lazyView(() => import('./views/TrainerClient.jsx'))
 const TrainerManaged = lazyView(() => import('./views/TrainerManaged.jsx'))
+const ManagedSettings = lazyView(() => import('./views/ManagedSettings.jsx'))
 const SettingsRoute = lazyView(() => import('./views/Settings.jsx').then(m => ({ default: m.SettingsRoute })))
 let viewsPrefetched = false
 const prefetchViews = () => {
@@ -129,12 +134,15 @@ function Shell() {
   // Store apps: which animation packs this device has, and the one the chosen quality wants for
   // the figure shown (components/Animations.jsx). Nothing on the web.
   useAnimPacksBoot()
+  // A client's diary opened by their trainer (lib/managed-mode.js): the app's own screens, minus everything that
+  // belongs to the account, and a bar saying whose diary it is.
+  const managed = isManagedMode()
   const isGuest = useStore(s => s.isGuest())
   const needsMobileOnboarding = useStore(s => s.needsMobileOnboarding)
   const permSteps = useStore(s => s.permSteps)
   const [firstRunPreview, setFirstRunPreview] = useState(() => import.meta.env.DEV && !DEMO
     && new URLSearchParams(window.location.search).get('firstRunPreview') === '1')
-  const needsFirstRunOnboarding = useStore(s => s.ready && !!(s.user || s.isGuest())
+  const needsFirstRunOnboarding = useStore(s => !managed && s.ready && !!(s.user || s.isGuest())
     && !s.needsMobileOnboarding && !s.permSteps && (firstRunPreview || needsFirstRun(s.S, DEMO)))
   const langV = useLang()   // re-renders the whole shell when the language (pack) changes
   useEffect(() => { setNav(navigate) }, [navigate])
@@ -187,7 +195,7 @@ function Shell() {
   // lib/push.js): a subscription the instance lost is back before the next reminder is due,
   // with nobody having to visit Settings. Web only — the APK has no service worker.
   useEffect(() => {
-    if (MOBILE || !user || !ready) return
+    if (MOBILE || !user || !ready || managed) return
     syncPushSubscription().catch(() => {})
   }, [user?.id, ready])
   // Opened from a device-link QR code (#95): once boot knows who is here, the sheet that redeems
@@ -297,7 +305,23 @@ function Shell() {
     </div>
   )
 
-  const view = l => (!authed ? <Login /> : needsMobileOnboarding ? <MobileOnboarding /> : permSteps ? <PermissionSteps /> : needsFirstRunOnboarding ? <FirstRunOnboarding onFinish={() => setFirstRunPreview(false)} /> : (
+  const managedRoutes = l => (
+    <Routes location={l}>
+      <Route path="/home" element={<Home />} />
+      <Route path="/plan" element={<Plan />} />
+      <Route path="/plan/r/:id" element={<RoutineEdit />} />
+      <Route path="/workout" element={<Workout />} />
+      <Route path="/stats" element={<Stats />} />
+      <Route path="/history" element={<History />} />
+      <Route path="/muscles" element={<Muscles />} />
+      <Route path="/structural-balance" element={<StructuralBalance />} />
+      <Route path="/measurements" element={<Measurements />} />
+      <Route path="/settings" element={<ManagedSettings />} />
+      {/* No exercise library, Coach, trainer screens or admin here: the client's account is not the trainer's to run. */}
+      <Route path="*" element={<Navigate to="/home" replace />} />
+    </Routes>
+  )
+  const view = l => (!authed ? (managed ? <ManagedEnded /> : <Login />) : managed ? managedRoutes(l) : needsMobileOnboarding ? <MobileOnboarding /> : permSteps ? <PermissionSteps /> : needsFirstRunOnboarding ? <FirstRunOnboarding onFinish={() => setFirstRunPreview(false)} /> : (
     <Routes location={l}>
       <Route path="/home" element={<Home />} />
       <Route path="/plan" element={<Plan />} />
@@ -342,11 +366,11 @@ function Shell() {
       {/* Outside #app: the view's fade-in animates a transform, and a fixed element inside it
           would ride along with the page for the length of it. Decides for itself when to show —
           including on the sign-in screen, when the server has just ended the session. */}
-      <SyncBanner />
+      {managed ? <ManagedBar /> : <SyncBanner />}
       {/* A plan a friend sent as a link: its preview opens once the app is past sign-in and first-run setup. */}
-      <SharedPlanGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />
+      {!managed && <SharedPlanGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />}
       {/* A trainer's invitation (startapp=t_<token>): the consent screen opens at the same moment. */}
-      <TrainerConsentGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />
+      {!managed && <TrainerConsentGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />}
       {!noTabs && <TabBar onStart={startFlow} />}
       <RestTimer />
       <Modals />
@@ -392,6 +416,13 @@ export default function App() {
   const telegram = useStore(s => s.telegram)
   const retryTelegram = useStore(s => s.bootTelegram)
   useEffect(() => { boot() }, [boot])
+  // A client's diary opened by their trainer: still inside Telegram, so the window's size and safe area follow it
+  // as in the rest of the app; and the diary must still be the trainer's to open (deleted, or another trainer's).
+  useEffect(() => {
+    if (!isManagedMode()) return
+    loadTelegram().then(prepareTelegram).catch(() => { /* a plain browser: nothing to follow */ })
+    api('/api/data/rev').catch(e => { if (e.status === 404) leaveManagedMode('Дневник подопечного недоступен: возможно, он удалён.') })
+  }, [])
   useEffect(() => { prefetchViews() }, [])
   // Android system back — sheet, then page, then press-again-to-exit (see lib/back.js)
   useEffect(() => {

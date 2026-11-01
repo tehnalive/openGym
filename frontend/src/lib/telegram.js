@@ -1,7 +1,10 @@
+import { isManagedMode } from './managed-mode.js'
 // Telegram launch data is a credential, never an identity until the server verifies it.
 // Ordinary browsers do not load an external SDK or depend on telegram.org being reachable.
 export function isTelegramLaunch() {
   if (typeof window === 'undefined') return false
+  // A client's diary opened by the trainer (lib/managed-mode.js) is signed in through the trainer's session, not Telegram.
+  if (isManagedMode()) return false
   const hash = new URLSearchParams(window.location.hash.slice(1))
   const query = new URLSearchParams(window.location.search)
   const launch = !!window.Telegram?.WebApp?.initData || hash.has('tgWebAppData') || query.has('tgWebAppData') || hash.has('tgWebAppVersion') || query.has('tgWebAppVersion')

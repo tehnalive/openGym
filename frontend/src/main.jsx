@@ -1,3 +1,6 @@
+// First, before any other module reads a storage key or makes a request: in a client's diary opened by their
+// trainer (lib/managed-mode.js) it puts the diary's own storage names and network rules in place.
+import { isManagedMode } from './lib/managed-mode.js'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
@@ -27,7 +30,8 @@ createRoot(document.getElementById('root')).render(
 
 // The photos and videos of custom exercises, in every build (the phone and the demo included):
 // uploads of what the server lacks, the local clean-up, and the plan's files kept offline.
-startTelegramAwareMediaSync(useStore, startMediaSync)
+// Not in a managed client's diary: it has no photos or videos, and the trainer's own are not to be touched.
+if (!isManagedMode()) startTelegramAwareMediaSync(useStore, startMediaSync)
 
 // Android 15 does not resize the page for the soft keyboard; the app says how much it covers and
 // this keeps the focused field above it. Idle everywhere else.
@@ -36,7 +40,7 @@ startNativeKeyboard()
 startKbDebug()
 
 // Not in the mobile build: the native shell already serves everything from disk.
-if (!MOBILE && 'serviceWorker' in navigator && location.protocol === 'https:') {
+if (!MOBILE && !isManagedMode() && 'serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {})
   // The plan's exercise media, kept by the worker for a workout opened without a network (#281).
   // It only fetches ahead while the page runs as the installed app; a tab keeps what it has shown.

@@ -6,6 +6,8 @@ import { t } from '../lib/i18n.js'
 import Icon from './Icon.jsx'
 import Elapsed from './Elapsed.jsx'
 import { useConnectionTrouble } from './SyncBanner.jsx'
+import { isManagedMode } from '../lib/managed-mode.js'
+import { leaveManagedDiary } from './ManagedBar.jsx'
 
 // Module scope, not TabBar's render body. Declared inside it, `Tab` was a new function on every
 // render, so React saw a different component type each time and threw the button away and built a
@@ -68,7 +70,10 @@ export default function TabBar({ onStart }) {
           : <span>{S.active ? (cur === 'workout' ? t('Workout') : S.active.editingWorkoutId ? t('Edit workout') : t('Resume')) : t('Start')}</span>}
       </button>
       <Tab active={on('stats')} icon="chart" label={t('Stats')} onClick={() => switchTab('/stats')} />
-      <Tab active={on('library')} icon="dumbbell" label={t('Exercises')} onClick={() => switchTab('/library')} />
+      {/* In a client's diary opened by the trainer the exercise library is not there; the way back to the cabinet is. */}
+      {isManagedMode()
+        ? <Tab active={false} icon="personCircle" label="К подопечным" onClick={leaveManagedDiary} />
+        : <Tab active={on('library')} icon="dumbbell" label={t('Exercises')} onClick={() => switchTab('/library')} />}
     </nav>
   )
 }

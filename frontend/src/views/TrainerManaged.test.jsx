@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
-const mocks = vi.hoisted(() => ({ api: vi.fn() }))
+const mocks = vi.hoisted(() => ({ api: vi.fn(), enter: vi.fn(() => true) }))
 vi.mock('../lib/api.js', async importOriginal => ({ ...(await importOriginal()), api: mocks.api }))
+// Entering the diary reloads the page; here it is only recorded.
+vi.mock('../lib/managed-mode.js', async importOriginal => ({ ...(await importOriginal()), enterManagedMode: mocks.enter }))
 
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
@@ -46,7 +48,7 @@ const DIARY = (over = {}) => ({ linkId: 'link-mmmm-1', name: 'Мама', note: '
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  mocks.api.mockReset(); localStorage.clear()
+  mocks.api.mockReset(); mocks.enter.mockClear(); mocks.enter.mockImplementation(() => true); localStorage.clear()
   useUI.setState({ sheets: [], toastMsg: '' })
   document.body.innerHTML = ''
 })
@@ -63,7 +65,7 @@ const route = table => (path, init) => {
 describe('adding a client', () => {
   const base = { 'GET /api/trainer/me': ME, 'GET /api/trainer/clients': LIST }
 
-  it('offers Telegram or no Telegram, and a managed client opens its own screen', async () => {
+  it('offers Telegram or no Telegram; a managed client opens as the ordinary app, its data screen is one tap away', async () => {
     mocks.api.mockImplementation(route(base))
     const host = mount('/trainer')
     await flush()
@@ -71,10 +73,14 @@ describe('adding a client', () => {
     click(button(host, 'Добавить подопечного'))
     expect(button(host, 'Через Telegram')).toBeTruthy(); expect(button(host, 'У него нет Telegram')).toBeTruthy()
     click([...host.querySelectorAll('.item')].find(x => x.textContent.includes('Мама')))
+    expect(mocks.enter).toHaveBeenCalledWith('link-mmmm-1', 'Мама')
+    expect(where(host)).toBe('/trainer')
+    click(host.querySelector('[aria-label="Данные подопечного: Мама"]'))
     expect(where(host)).toBe('/trainer/m/link-mmmm-1')
+    expect(mocks.enter).toHaveBeenCalledTimes(1)
   })
 
-  it('needs a name and the 18+ box, then creates the client and opens the diary', async () => {
+  it('needs a name and the 18+ box, then creates the client and opens the diary in the app', async () => {
     mocks.api.mockImplementation(route({ ...base, 'POST /api/trainer/managed': { linkId: 'link-new-22', name: 'Дед', note: '' } }))
     const host = mount('/trainer')
     await flush()
@@ -86,7 +92,7 @@ describe('adding a client', () => {
     click(create()); await flush()
     const call = mocks.api.mock.calls.find(([p, i]) => p === '/api/trainer/managed' && i?.method === 'POST')
     expect(JSON.parse(call[1].body)).toEqual({ name: 'Дед', note: '', unit: 'kg', ageConfirmed: true })
-    expect(where(host)).toBe('/trainer/m/link-new-22')
+    expect(mocks.enter).toHaveBeenCalledWith('link-new-22', 'Дед')
   })
 
   it('shows a refusal such as the client limit', async () => {
@@ -101,83 +107,37 @@ describe('adding a client', () => {
   })
 })
 
-describe('keeping the diary', () => {
+describe('the data of a managed client', () => {
   const table = extra => ({ 'GET /api/trainer/managed/link-mmmm-1': DIARY(), ...extra })
 
-  it('says whose diary is open and keeps it out of the trainer\'s own store and storage', async () => {
+  it('shows the note and what the diary holds, opens it in the app, and keeps it out of the own store and storage of the trainer', async () => {
     const before = JSON.stringify(useStore.getState().S)
     mocks.api.mockImplementation(route(table()))
     const host = mount('/trainer/m/link-mmmm-1')
     await flush()
-    expect(host.querySelector('[role=status]').textContent).toContain('Вы ведёте дневник: Мама')
-    expect(host.textContent).toContain('Ноги')
+    expect(host.textContent).toContain('Мама')
+    expect(host.textContent).toContain('колено')
+    expect(host.textContent).toContain('1 трен., 1 взвеш., 1 замеров')
+    // Nothing is recorded on this screen: the forms of the compact version are gone.
+    expect(button(host, 'Записать тренировку')).toBeFalsy()
+    expect(host.querySelector('input')).toBeNull()
+    click(button(host, 'Открыть дневник'))
+    expect(mocks.enter).toHaveBeenCalledWith('link-mmmm-1', 'Мама')
     expect(JSON.stringify(useStore.getState().S)).toBe(before)
     expect(localStorage.length).toBe(0)
   })
 
-  it('records a weigh-in with the revision it was made against and shows the answer', async () => {
-    const ops = vi.fn(() => ({ ok: true, rev: 5, data: DIARY({ bodyweight: [{ d: TODAY, w: 71.5 }, { d: '2026-10-19', w: 70 }] }).data }))
-    mocks.api.mockImplementation(route(table({ 'POST /api/trainer/managed/link-mmmm-1/ops': ops })))
+  it('asks before deleting the client, and deletes only after the answer', async () => {
+    const del = vi.fn(() => ({ ok: true }))
+    mocks.api.mockImplementation(route(table({ 'DELETE /api/trainer/managed/link-mmmm-1': del })))
     const host = mount('/trainer/m/link-mmmm-1')
     await flush()
-    click([...host.querySelectorAll('.seg button')].find(b => b.textContent === 'Вес и замеры'))
-    type(field(host, 'Вес'), '71,5')
-    click(button(host, 'Записать вес')); await flush()
-    const body = JSON.parse(ops.mock.calls[0][0].body)
-    expect(body).toEqual({ baseRev: 4, ops: [{ op: 'bodyweight.set', d: TODAY, w: 71.5 }] })
-    expect(host.textContent).toContain('71.5')
-  })
-
-  it('writes a workout through the form', async () => {
-    const ops = vi.fn(() => ({ ok: true, rev: 5, data: DIARY().data }))
-    mocks.api.mockImplementation(route(table({ 'POST /api/trainer/managed/link-mmmm-1/ops': ops })))
-    const host = mount('/trainer/m/link-mmmm-1')
-    await flush()
-    click(button(host, 'Записать тренировку'))
-    // No exercise yet: the form says so and sends nothing.
-    click([...host.querySelectorAll('button')].find(b => b.textContent === 'Записать'))
-    expect(host.querySelector('[role=alert]').textContent).toContain('упражнение')
-    expect(ops).not.toHaveBeenCalled()
-    const name = EXDB.find(e => e.id === exId).n
-    type(field(host, 'Поиск упражнения'), name)
-    const pick = [...host.querySelectorAll('button.item')][0]
-    expect(pick).toBeTruthy()
-    click(pick)
-    type(field(host, 'Вес, подход 1'), '50'); type(field(host, 'Повторы, подход 1'), '8')
-    click([...host.querySelectorAll('button')].find(b => b.textContent === 'Записать')); await flush()
-    expect(ops).toHaveBeenCalledTimes(1)
-    const sent = JSON.parse(ops.mock.calls[0][0].body)
-    expect(sent.baseRev).toBe(4)
-    expect(sent.ops[0].op).toBe('workout.save')
-    expect(sent.ops[0].workout.entries[0].sets[0]).toMatchObject({ w: 50, r: 8, done: true })
-  })
-
-  it('takes the server\'s newer diary on a conflict', async () => {
-    const newer = DIARY({ workouts: [], bodyweight: [{ d: '2026-10-25', w: 69 }] })
-    mocks.api.mockImplementation(route(table({ 'POST /api/trainer/managed/link-mmmm-1/ops': Object.assign(new Error('x'), { status: 409, data: { code: 'conflict', error: 'Дневник изменился в другом окне. Данные обновлены, повторите действие', rev: 9, data: newer.data } }) })))
-    const host = mount('/trainer/m/link-mmmm-1')
-    await flush()
-    click([...host.querySelectorAll('.seg button')].find(b => b.textContent === 'Вес и замеры'))
-    type(field(host, 'Вес'), '70'); click(button(host, 'Записать вес')); await flush()
-    expect(useUI.getState().toastMsg).toContain('Дневник изменился')
-    expect(host.textContent).toContain('69')
-  })
-
-  it('asks before deleting a workout and before deleting the client', async () => {
-    mocks.api.mockImplementation(route(table()))
-    const host = mount('/trainer/m/link-mmmm-1')
-    await flush()
-    click(host.querySelector('.item [role=button]'))
-    click(button(host, 'Удалить тренировку'))
-    expect(useUI.getState().sheets.length).toBe(1)
-    expect(mocks.api.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(false)
-    useUI.setState({ sheets: [] })
     click(button(host, 'Удалить подопечного'))
     expect(useUI.getState().sheets.length).toBe(1)
-    expect(mocks.api.mock.calls.some(([, i]) => i?.method === 'DELETE')).toBe(false)
+    expect(del).not.toHaveBeenCalled()
   })
 
-  it('says so when the client is not the trainer\'s', async () => {
+  it('says so when the client is not the one of this trainer', async () => {
     mocks.api.mockImplementation(route({ 'GET /api/trainer/managed/link-mmmm-1': Object.assign(new Error('x'), { status: 404, data: { code: 'client-gone', error: 'Подопечный недоступен' } }) }))
     const host = mount('/trainer/m/link-mmmm-1')
     await flush()
