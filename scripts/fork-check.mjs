@@ -48,6 +48,11 @@ const PRESENCE = [
   ['Trainer mode: API image ships trainer-managed.js', 'api/Dockerfile', 'has', 'trainer-managed.js'],
   ['Trainer mode: managed routes in openapi.yaml', 'api/openapi.yaml', 'has', '/api/trainer/managed/{id}/ops:'],
   ['Trainer mode: managed client screen route', 'frontend/src/App.jsx', 'has', '/trainer/m/:linkId'],
+  ['Managed diary: document routes', 'api/openapi.yaml', 'has', '/api/trainer/managed/{id}/data:'],
+  ['Managed diary: guards load before any other module', 'frontend/src/main.jsx', 'has', "import { isManagedMode } from './lib/managed-mode.js'"],
+  ['Managed diary: not a Telegram launch', 'frontend/src/lib/telegram.js', 'has', 'if (isManagedMode()) return false'],
+  ['Managed diary: bar and routes in App', 'frontend/src/App.jsx', 'has', '<ManagedBar />'],
+  ['Managed diary: no exercise library tab', 'frontend/src/components/TabBar.jsx', 'has', 'isManagedMode()'],
   ['Trainer mode: settings card', 'frontend/src/views/Settings.jsx', 'has', '<TrainerSettings />'],
   ['Removed: check-in screen', 'frontend/src/App.jsx', 'not', 'views/CheckIn.jsx'],
   ['Removed: progress photos screen', 'frontend/src/App.jsx', 'not', 'views/ProgressPhotos.jsx'],
@@ -59,7 +64,7 @@ const FRONTEND_TESTS = [
   'src/App.telegram.test.jsx', 'src/components/ProfileAvatar.test.jsx', 'src/views/FirstRunOnboarding.test.jsx',
   'src/store/useStore.telegram.test.jsx',
   'src/lib/trainer.test.js', 'src/components/TrainerConsent.test.jsx', 'src/views/Trainer.test.jsx', 'src/lib/plan-link.test.js',
-  'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx',
+  'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx', 'src/lib/managed-mode.test.js', 'src/components/ManagedBar.test.jsx',
 ]
 const API_TESTS = [
   'test/fork-routes.test.js', 'test/server-telegram-only.test.js', 'test/telegram-login.test.js', 'test/openapi-routes.test.js',
