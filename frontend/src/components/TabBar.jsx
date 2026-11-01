@@ -73,7 +73,10 @@ export default function TabBar({ onStart }) {
       {/* In a client's diary opened by the trainer the exercise library is not there; the way back to the cabinet is. */}
       {isManagedMode()
         ? <Tab active={false} icon="chevronLeft" label="К подопечным" onClick={leaveManagedDiary} />
-        : <Tab active={on('library')} icon="dumbbell" label={t('Exercises')} onClick={() => switchTab('/library')} />}
+        : user?.trainer
+          // A trainer's last tab is the cabinet; the library is one tap away from it.
+          ? <Tab active={on('trainer')} icon="personCircle" label="Кабинет" onClick={() => switchTab('/trainer')} />
+          : <Tab active={on('library')} icon="dumbbell" label={t('Exercises')} onClick={() => switchTab('/library')} />}
     </nav>
   )
 }

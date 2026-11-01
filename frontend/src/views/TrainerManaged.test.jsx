@@ -182,3 +182,62 @@ describe('avatars in the cabinet', () => {
     expect(rows[1].querySelector('.sp-avatar img')).toBeNull()
   })
 })
+
+describe('the week of the trainer in the cabinet', () => {
+  const sched = (days, time = '', remind = false) => ({ days, time, remind })
+  const clientsToday = () => {
+    const wd = new Date().getDay() === 0 ? 7 : new Date().getDay()
+    const other = wd === 1 ? 2 : 1
+    return { limit: 5, clients: [
+      { linkId: 'link-tg-0001', name: 'Мария', since: '2026-10-30T00:00:00Z', grants: { history: true, measures: false, stats: false }, schedule: sched([wd], '18:00', true) },
+      { linkId: 'link-tg-0002', name: 'Олег', since: '2026-10-30T00:00:00Z', grants: { history: true, measures: false, stats: false }, schedule: sched([other], '10:00') },
+      { linkId: 'link-mmmm-1', name: 'Мама', managed: true, since: '2026-10-30T00:00:00Z', grants: { history: true, measures: true, stats: true }, schedule: null },
+    ] }
+  }
+
+  it('shows who comes today, the week, and the days on each client', async () => {
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/me': ME, 'GET /api/trainer/clients': clientsToday() }))
+    const host = mount('/trainer')
+    await flush()
+    const today = host.querySelector('[aria-label=Сегодня]')
+    expect(today.textContent).toContain('18:00')
+    expect(today.textContent).toContain('Мария')
+    expect(today.textContent).not.toContain('Олег')
+    expect(host.querySelector('[aria-label=Неделя]').textContent).toContain('Олег')
+    expect(host.textContent).toMatch(/напоминание/)
+    click(today.querySelector('[role=button]'))
+    expect(where(host)).toBe('/trainer/link-tg-0001')
+  })
+
+  it('says what to do while nobody has days yet', async () => {
+    const list = clientsToday(); list.clients.forEach(c => { c.schedule = null })
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/me': ME, 'GET /api/trainer/clients': list }))
+    const host = mount('/trainer')
+    await flush()
+    expect(host.querySelector('[aria-label=Сегодня]').textContent).toContain('Отметьте у подопечных')
+    expect(host.querySelector('[aria-label=Неделя]')).toBeNull()
+  })
+
+  it('sets the days, the time and the reminder of a client, and the list takes the answer', async () => {
+    const list = clientsToday(); list.clients[2].schedule = null
+    const put = vi.fn(() => ({ schedule: { days: [2, 4], time: '19:15', remind: true } }))
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/me': ME, 'GET /api/trainer/clients': list, 'PUT /api/trainer/links/link-mmmm-1/schedule': put }))
+    const host = mount('/trainer')
+    await flush()
+    click(host.querySelector('[aria-label="Расписание: Мама"]'))
+    const sheet = useUI.getState().sheets.at(-1)
+    const box = document.createElement('div'); document.body.appendChild(box)
+    const r2 = createRoot(box)
+    act(() => r2.render(sheet.render(() => useUI.setState({ sheets: [] }))))
+    click(box.querySelector('[aria-label=Вторник]')); click(box.querySelector('[aria-label=Четверг]'))
+    type(box.querySelector('[aria-label="Время занятия"]'), '19:15')
+    click(box.querySelector('[aria-label=Напоминать]'))
+    click([...box.querySelectorAll('button')].find(b => b.textContent === 'Сохранить'))
+    await flush()
+    const call = mocks.api.mock.calls.find(([p, i]) => p === '/api/trainer/links/link-mmmm-1/schedule' && i?.method === 'PUT')
+    const body = JSON.parse(call[1].body)
+    expect(body.days).toEqual([2, 4]); expect(body.time).toBe('19:15'); expect(body.remind).toBe(true)
+    expect(host.textContent).toContain('Вт Чт · 19:15 · напоминание')
+    act(() => r2.unmount()); box.remove()
+  })
+})

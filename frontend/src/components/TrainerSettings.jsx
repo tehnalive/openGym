@@ -23,7 +23,12 @@ export default function TrainerSettings() {
   const trainer = me.trainer
   const toggle = async on => {
     setBusy(true)
-    try { await trainerApi.setRole(on, age); setAge(false); await load() }
+    try {
+      await trainerApi.setRole(on, age); setAge(false)
+      // The tab bar shows the cabinet instead of the exercise library for a trainer (components/TabBar.jsx).
+      useStore.setState(s => ({ user: s.user ? { ...s.user, trainer: on } : s.user }))
+      await load()
+    }
     catch (e) { toast(errorText(e)) }
     finally { setBusy(false) }
   }

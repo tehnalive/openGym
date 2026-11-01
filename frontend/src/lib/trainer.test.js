@@ -106,3 +106,34 @@ describe('small helpers', () => {
     expect(errorText(new Error('network'))).toMatch(/Проверьте соединение/)
   })
 })
+
+describe('the trainer week', () => {
+  const clients = [
+    { linkId: 'a', name: 'Вася', schedule: { days: [1, 3, 5], time: '18:00', remind: true } },
+    { linkId: 'b', name: 'Аня', schedule: { days: [1], time: '09:30', remind: false } },
+    { linkId: 'c', name: 'Боря', schedule: { days: [1], time: '', remind: false } },
+    { linkId: 'd', name: 'Без дней', schedule: null },
+  ]
+  it('names the days, the time and the reminder', async () => {
+    const { scheduleText } = await import('./trainer.js')
+    expect(scheduleText(clients[0].schedule)).toBe('Пн Ср Пт · 18:00 · напоминание')
+    expect(scheduleText({ days: [7], time: '', remind: false })).toBe('Вс')
+    expect(scheduleText(null)).toBe('')
+    expect(scheduleText({ days: [], time: '10:00', remind: true })).toBe('')
+  })
+  it('lists who comes on a day by time, the ones with no time last', async () => {
+    const { clientsOn, weekPlan } = await import('./trainer.js')
+    expect(clientsOn(clients, 1).map(x => x.name)).toEqual(['Аня', 'Вася', 'Боря'])
+    expect(clientsOn(clients, 2)).toEqual([])
+    expect(clientsOn(clients, 3).map(x => x.name)).toEqual(['Вася'])
+    const week = weekPlan(clients)
+    expect(week.map(d => d.short)).toEqual(['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'])
+    expect(week[0].clients).toHaveLength(3)
+    expect(week[4].clients.map(x => x.name)).toEqual(['Вася'])
+  })
+  it('reads the ISO weekday of a date: Sunday is 7', async () => {
+    const { isoWeekday } = await import('./trainer.js')
+    expect(isoWeekday(new Date(2026, 10, 1))).toBe(7)
+    expect(isoWeekday(new Date(2026, 10, 2))).toBe(1)
+  })
+})

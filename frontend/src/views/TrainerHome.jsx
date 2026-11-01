@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
-import { trainerApi, errorText, grantsText, daysSince, ago } from '../lib/trainer.js'
+import { trainerApi, errorText, grantsText, daysSince, ago, scheduleText, clientsOn, weekPlan, isoWeekday } from '../lib/trainer.js'
+import { scheduleSheet } from '../components/TrainerSchedule.jsx'
 import { sendLink, copyLink } from '../lib/plan-link.js'
 import { takeManagedNotice } from '../lib/managed-mode.js'
 import { openManagedDiary } from '../components/ManagedBar.jsx'
@@ -65,15 +66,36 @@ export default function TrainerHome() {
     try { await trainerApi.revokeInvite(id); setFresh(f => (f && f.id === id ? null : f)); toast('Приглашение отозвано'); await load() }
     catch (e) { toast(errorText(e)) }
   }
+  const setSchedule = (linkId, schedule) => setClients(list => list.map(c => (c.linkId === linkId ? { ...c, schedule } : c)))
+  const today = clients ? clientsOn(clients, isoWeekday()) : []
+  const planned = !!clients && clients.some(c => c.schedule?.days?.length)
   const full = me && clients && clients.length >= me.trainer.limit
   const invites = me?.trainer.invites || []
 
   return <>
     <div className="hdr"><button className="iconbtn" data-back="/settings" onClick={() => nav('/settings')} aria-label="Настройки"><Icon name="chevronLeft" /></button>
       <div style={{ flex: 1, marginInlineStart: 12 }}><h1>Кабинет тренера</h1>
-        <div className="sub">{me ? `Подопечных: ${clients ? clients.length : me.trainer.clients} из ${me.trainer.limit}` : ' '}</div></div></div>
+        <div className="sub">{me ? `Подопечных: ${clients ? clients.length : me.trainer.clients} из ${me.trainer.limit}` : ' '}</div></div>
+      <button className="iconbtn" onClick={() => nav('/library')} aria-label="Упражнения" title="Упражнения"><Icon name="dumbbell" /></button></div>
 
     {error && <div role="alert" className="small" style={{ color: 'var(--red)', margin: '0 0 12px', lineHeight: 1.4 }}>{error}</div>}
+
+    {clients && clients.length > 0 && <>
+      <div className="card" style={{ marginBottom: 12 }} aria-label="Сегодня">
+        <div className="tt" style={{ marginBottom: 6 }}>Сегодня</div>
+        {today.length
+          ? today.map(x => <div key={x.linkId} className="row between" role="button" tabIndex={0} style={{ padding: '6px 0', gap: 10 }}
+            onClick={() => openClient(x.client, nav)} onKeyDown={e => { if (e.key === 'Enter') openClient(x.client, nav) }}>
+            <span><strong>{x.time || 'В любое время'}</strong> · {x.name}</span>{x.remind && <Icon name="bell" />}</div>)
+          : <div className="dim small" style={{ lineHeight: 1.4 }}>{planned ? 'Сегодня никто не записан.' : 'Отметьте у подопечных, в какие дни они приходят, и здесь появится расписание.'}</div>}
+      </div>
+      {planned && <div className="card" style={{ marginBottom: 12 }} aria-label="Неделя">
+        <div className="tt" style={{ marginBottom: 6 }}>Неделя</div>
+        {weekPlan(clients).map(d => <div key={d.iso} className="row" style={{ padding: '4px 0', gap: 10, alignItems: 'baseline', fontWeight: d.iso === isoWeekday() ? 600 : 400 }}>
+          <span style={{ width: 28 }}>{d.short}</span>
+          <span className={d.clients.length ? '' : 'dim'} style={{ flex: 1 }}>{d.clients.length ? d.clients.map(x => (x.time ? x.time + ' ' : '') + x.name).join(', ') : '—'}</span></div>)}
+      </div>}
+    </>}
 
     {clients && (clients.length
       ? <div className="list">{clients.map(c => <div key={c.linkId} className="item" role="button" tabIndex={0}
@@ -81,7 +103,10 @@ export default function TrainerHome() {
         {/* The client's Telegram picture, else the initial on a grey disc; a client without Telegram has the initial only. */}
         <ProfileAvatar user={{ id: c.linkId, name: c.name, avatarUrl: c.avatarUrl }} size={38} neutral />
         <div className="grow"><div className="tt">{c.name}</div>
-          <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div></div>
+          <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div>
+          {scheduleText(c.schedule) && <div className="ss">{scheduleText(c.schedule)}</div>}</div>
+        <button className="iconbtn" aria-label={'Расписание: ' + c.name} title="Расписание"
+          onClick={e => { e.stopPropagation(); scheduleSheet({ linkId: c.linkId, name: c.name, schedule: c.schedule, onSaved: sc => setSchedule(c.linkId, sc) }) }} onKeyDown={e => e.stopPropagation()}><Icon name="calendar" /></button>
         {c.managed && <button className="iconbtn" aria-label={'Данные подопечного: ' + c.name} title="Данные, скачать, удалить"
           onClick={e => { e.stopPropagation(); nav('/trainer/m/' + c.linkId) }} onKeyDown={e => e.stopPropagation()}><Icon name="gear" /></button>}
         <Icon name="chevronRight" className="chev" />

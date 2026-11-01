@@ -49,6 +49,7 @@ export const trainerApi = {
   accept: (token, ageConfirmed, grants) => call('/api/trainer/invites/accept', 'POST', { token, ageConfirmed, grants }),
   clients: () => call('/api/trainer/clients'),
   clientData: linkId => call('/api/trainer/clients/' + encodeURIComponent(linkId) + '/data'),
+  setSchedule: (linkId, schedule) => call('/api/trainer/links/' + encodeURIComponent(linkId) + '/schedule', 'PUT', { ...schedule, tz: localTz() }),
   endLink: linkId => call('/api/trainer/links/' + encodeURIComponent(linkId), 'DELETE'),
   // Managed clients: a diary the trainer keeps for someone without Telegram.
   addManaged: body => call('/api/trainer/managed', 'POST', body),
@@ -103,3 +104,31 @@ export function daysSince(iso, now = new Date()) {
   return Math.max(0, Math.round((a - Date.UTC(y, m - 1, d)) / 86400000))
 }
 export const ago = n => (n === null ? 'нет тренировок' : n === 0 ? 'сегодня' : n === 1 ? 'вчера' : `${n} дн. назад`)
+
+// ---- the trainer's week: which days a client comes ----
+export const WEEKDAYS = [
+  { iso: 1, short: 'Пн', long: 'Понедельник' }, { iso: 2, short: 'Вт', long: 'Вторник' }, { iso: 3, short: 'Ср', long: 'Среда' },
+  { iso: 4, short: 'Чт', long: 'Четверг' }, { iso: 5, short: 'Пт', long: 'Пятница' }, { iso: 6, short: 'Сб', long: 'Суббота' },
+  { iso: 7, short: 'Вс', long: 'Воскресенье' },
+]
+function localTz() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined } catch { return undefined } }
+/** The ISO weekday (1 = Monday .. 7 = Sunday) of a Date. */
+export const isoWeekday = (d = new Date()) => (d.getDay() === 0 ? 7 : d.getDay())
+
+/** "Пн Ср Пт · 18:00 · напоминание", or '' for a client with no days. */
+export function scheduleText(s) {
+  if (!s || !Array.isArray(s.days) || !s.days.length) return ''
+  const days = s.days.map(d => WEEKDAYS.find(w => w.iso === d)?.short).filter(Boolean).join(' ')
+  return [days, s.time, s.remind ? 'напоминание' : ''].filter(Boolean).join(' · ')
+}
+
+const byTime = (a, b) => (a.time || '99:99') < (b.time || '99:99' ) ? -1 : (a.time || '99:99') > (b.time || '99:99') ? 1 : a.name.localeCompare(b.name, 'ru')
+
+/** Who comes on this ISO weekday: [{ linkId, name, time, remind }], the booked times first, by time. */
+export function clientsOn(clients, iso) {
+  return (clients || []).filter(c => c.schedule?.days?.includes(iso))
+    .map(c => ({ linkId: c.linkId, name: c.name, time: c.schedule.time || '', remind: !!c.schedule.remind, client: c })).sort(byTime)
+}
+
+/** The whole week for the cabinet: one entry per weekday. */
+export const weekPlan = clients => WEEKDAYS.map(w => ({ ...w, clients: clientsOn(clients, w.iso) }))
