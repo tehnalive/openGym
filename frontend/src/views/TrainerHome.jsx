@@ -93,7 +93,7 @@ export default function TrainerHome() {
         <div className="tt" style={{ marginBottom: 6 }}>Неделя</div>
         {weekPlan(clients).map(d => <div key={d.iso} className="row" style={{ padding: '4px 0', gap: 10, alignItems: 'baseline', fontWeight: d.iso === isoWeekday() ? 600 : 400 }}>
           <span style={{ width: 28 }}>{d.short}</span>
-          <span className={d.clients.length ? '' : 'dim'} style={{ flex: 1 }}>{d.clients.length ? d.clients.map(x => (x.time ? x.time + ' ' : '') + x.name).join(', ') : '—'}</span></div>)}
+          <span className={d.clients.length ? '' : 'dim'} style={{ flex: 1 }}>{d.clients.length ? d.clients.map(x => (x.time ? x.time + ' ' : '') + x.name).join(', ') : '–'}</span></div>)}
       </div>}
     </>}
 
