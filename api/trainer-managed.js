@@ -223,3 +223,36 @@ export function managedExport(name, S, now = Date.now()) {
 }
 
 export const newManagedId = () => crypto.randomBytes(12).toString('base64url');
+
+// ---- the whole document, for the ordinary app opened in the client's name (frontend lib/managed-mode.js) ----
+// Photos and videos are the client's own business and nothing here can upload one, so no reference to a stored
+// file travels in either direction; the keys below are the app's names for them. Everything else in the
+// document, stamps included, passes untouched: the app merges and pushes it with its usual rules.
+const MEDIA_KEYS = new Set(['media', 'photo', 'photos', 'video', 'videos']);
+// Top-level keys that belong to the person, not to the diary: progress photos, the AI coach's memory.
+const PERSONAL_KEYS = new Set(['dayPhotos', 'progressPhotos', 'coach']);
+
+function withoutMedia(v, depth = 0) {
+  if (depth > 12) return v;
+  if (Array.isArray(v)) return v.map(x => withoutMedia(x, depth + 1));
+  if (isRec(v)) {
+    const out = {};
+    for (const [k, x] of Object.entries(v)) {
+      if (MEDIA_KEYS.has(k) || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+      out[k] = withoutMedia(x, depth + 1);
+    }
+    return out;
+  }
+  return v;
+}
+
+function withoutPersonal(S) {
+  const out = withoutMedia(isRec(S) ? S : {});
+  for (const k of PERSONAL_KEYS) delete out[k];
+  return out;
+}
+
+/** A document pushed by the trainer's app, ready for commitState. */
+export const managedStateIn = withoutPersonal;
+/** A client's document on its way to the trainer's app. */
+export const managedStateOut = withoutPersonal;

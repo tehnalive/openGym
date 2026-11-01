@@ -3957,6 +3957,103 @@ paths:
           description: 'Not the caller''s managed client (`client-gone`).'
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/trainer/managed/{id}/data:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getManagedClientDocument
+      summary: Read a managed client's whole document
+      description: |
+        What `GET /api/data` answers for the client itself, for the ordinary app opened in the client's name.
+        Photos, videos and the client's personal keys are left out. Only the trainer who owns the client;
+        anything else answers `404 client-gone`.
+      responses:
+        '200':
+          description: The document and its revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: { type: object }
+                  rev: { type: integer }
+                  name: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    put:
+      tags: [data]
+      operationId: putManagedClientDocument
+      summary: Push a managed client's whole document
+      description: |
+        The write behind `PUT /api/data` (same revisions, stamps and `409` with the current document), with
+        the same checks on the body. Media and personal keys are dropped before it is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state: { type: object }
+                baseRev: { type: integer }
+                baseWid: { type: string }
+                stamped: { type: boolean }
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  rev: { type: integer }
+                  wid: { type: string }
+                  ts: { type: [integer, 'null'] }
+        '400':
+          description: The body is not a document.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '409':
+          description: The document moved since `baseRev`; the current one is in the answer.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/managed/{id}/data/rev:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getManagedClientRevision
+      summary: A managed client's revision
+      description: Just the revision, as `GET /api/data/rev` for the client itself.
+      responses:
+        '200':
+          description: The revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rev: { type: integer }
+                  wid: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/trainer/links/{id}:
     parameters:
       - name: id

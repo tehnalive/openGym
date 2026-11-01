@@ -33,7 +33,7 @@ import {
   trimForTrainer, summaryOf, LABEL_MAX
 } from './trainer.js';
 import {
-  isManaged, managedLinkFor, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId,
+  isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId,
 } from './trainer-managed.js';
 import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS,
@@ -277,6 +277,37 @@ function forClient(S) {
 // there is the honest reading of such a file — what was dropped carried nothing to show.
 const record = x => !!x && typeof x === 'object' && !Array.isArray(x);
 const records = v => (Array.isArray(v) ? v.filter(record) : []);
+
+// The checks a pushed document must pass before it is written, for PUT /api/data and for the trainer's write to a
+// managed client (same rules). Returns the 400 body, or null when the document may go on to commitState.
+function stateBodyError(body) {
+  if (!body.state || typeof body.state !== 'object') return { error: 'state required' };
+  // An object with nothing of the profile in it empties the document with the counter left
+  // intact: what lands on disk is `{"_rev":n+1}`, every routine, workout and weigh-in gone, and
+  // the next poll reports a revision the client accepts as its own. `_rev` and `_ts` do not
+  // count towards "something of the profile" — both are bookkeeping this route writes or echoes
+  // itself, so `{}` and `{"_rev":5}` are the same push and get the same refusal. Nothing
+  // shipped sends either: the web and mobile clients push a state built on DEF
+  // (frontend/src/store/useStore.js), which always carries its keys. An array is a document
+  // loss of its own and is left to the `invalid state` check below, which already refuses it.
+  if (!Array.isArray(body.state) && !Object.keys(body.state).some(k => k !== '_rev' && k !== '_ts')) {
+    return { error: 'state required' };
+  }
+  // The reminder tick and the admin routes iterate these two on the server's side, so a truthy
+  // non-array would throw there on every pass for as long as it sat on disk. Absent or null is
+  // fine — every client fills its own defaults. An array is `typeof 'object'` but no document:
+  // `_rev` set on it is dropped by JSON.stringify, so the file would read back as rev 0 while
+  // the response claimed the next revision.
+  const list = v => v == null || Array.isArray(v);
+  if (Array.isArray(body.state) || !list(body.state.workouts) || !list(body.state.routines)) return { error: 'invalid state' };
+  // The same readers walk every entry (`w.d`, `w.name`). They skip what is not an entry now
+  // (`records` above), but nothing should be storing one. Dropped, not refused:
+  // such an entry carries nothing worth keeping, whereas a 400 would strand a client whose own
+  // copy is already malformed — it keeps re-sending the same document and never syncs again.
+  for (const k of ['workouts', 'routines']) if (Array.isArray(body.state[k])) body.state[k] = records(body.state[k]);
+  return null;
+}
+
 
 /* ---------- push notifications (Web Push / VAPID) ---------- */
 const vapidFile = path.join(DATA, 'vapid.json');
@@ -2777,6 +2808,47 @@ const routes = {
     audit(req, 'trainer.managed.write', { user, target: t.client, msg: [...new Set(applied.changes)].join(',') });
     json(res, 200, { ok: true, rev: out.body.rev, data: managedView(readStateStrict(t.client.id) || {}) });
   },
+  // The whole document of a managed client, read and pushed the way the app's own sync does it (GET/PUT
+  // /api/data), so the trainer opens the client's diary in the ordinary app (frontend lib/managed-mode.js). The
+  // same revision, stamp and conflict rules: the write is commitState, and the checks are PUT /api/data's.
+  'GET /api/trainer/managed/{id}/data': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const state = readStateStrict(t.client.id);
+    if (state === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
+    json(res, 200, { state: managedStateOut(forClient(state)), rev: state?._rev || 0, name: displayName(t.client) });
+  },
+  'GET /api/trainer/managed/{id}/data/rev': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const doc = readStateCached(t.client.id);
+    json(res, 200, { rev: doc?._rev || 0, ...(doc?._wid ? { wid: doc._wid } : {}) });
+  },
+  'PUT /api/trainer/managed/{id}/data': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const body = await readBody(req);
+    // The await above: the link may have been deleted meanwhile.
+    if (!managedLinkFor(db, user.id, t.link.id) || !db.users.includes(t.client)) return trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
+    const bad = stateBodyError(body);
+    if (bad) return json(res, 400, bad);
+    body.state = managedStateIn(body.state);
+    const out = commitState(t.client, body);
+    if (out.status === 200) audit(req, 'trainer.managed.write', { user, target: t.client, msg: 'document' });
+    json(res, out.status, out.body);
+  },
   'GET /api/trainer/managed/{id}/export': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
@@ -3223,30 +3295,8 @@ const routes = {
     if (!user) return json(res, 401, { error: 'not signed in' });
     if (!stateIdentityMatches(req, res, user)) return;
     const body = await readBody(req);
-    if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
-    // An object with nothing of the profile in it empties the document with the counter left
-    // intact: what lands on disk is `{"_rev":n+1}`, every routine, workout and weigh-in gone, and
-    // the next poll reports a revision the client accepts as its own. `_rev` and `_ts` do not
-    // count towards "something of the profile" — both are bookkeeping this route writes or echoes
-    // itself, so `{}` and `{"_rev":5}` are the same push and get the same refusal. Nothing
-    // shipped sends either: the web and mobile clients push a state built on DEF
-    // (frontend/src/store/useStore.js), which always carries its keys. An array is a document
-    // loss of its own and is left to the `invalid state` check below, which already refuses it.
-    if (!Array.isArray(body.state) && !Object.keys(body.state).some(k => k !== '_rev' && k !== '_ts')) {
-      return json(res, 400, { error: 'state required' });
-    }
-    // The reminder tick and the admin routes iterate these two on the server's side, so a truthy
-    // non-array would throw there on every pass for as long as it sat on disk. Absent or null is
-    // fine — every client fills its own defaults. An array is `typeof 'object'` but no document:
-    // `_rev` set on it is dropped by JSON.stringify, so the file would read back as rev 0 while
-    // the response claimed the next revision.
-    const list = v => v == null || Array.isArray(v);
-    if (Array.isArray(body.state) || !list(body.state.workouts) || !list(body.state.routines)) return json(res, 400, { error: 'invalid state' });
-    // The same readers walk every entry (`w.d`, `w.name`). They skip what is not an entry now
-    // (`records` above), but nothing should be storing one. Dropped, not refused:
-    // such an entry carries nothing worth keeping, whereas a 400 would strand a client whose own
-    // copy is already malformed — it keeps re-sending the same document and never syncs again.
-    for (const k of ['workouts', 'routines']) if (Array.isArray(body.state[k])) body.state[k] = records(body.state[k]);
+    const bad = stateBodyError(body);
+    if (bad) return json(res, 400, bad);
     // Conditional write: a `baseRev` that is not the current revision means this client last
     // read an older document — another device has written since — and the copy it is about to
     // push would silently drop that write. The current document travels back with the 409, so
@@ -3703,7 +3753,7 @@ const server = http.createServer(async (req, res) => {
   if (tm && req.method === 'DELETE') { key = 'DELETE /api/trainer/' + tm[1] + '/{id}'; req.trainerId = tm[2]; }
   const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);
   if (tc) { key = req.method + ' /api/trainer/clients/{id}/data'; req.trainerId = tc[1]; }
-  const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export))?$/.exec(url.pathname);
+  const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export|data|data\/rev))?$/.exec(url.pathname);
   if (tg) { key = req.method + ' /api/trainer/managed/{id}' + (tg[2] ? '/' + tg[2] : ''); req.trainerId = tg[1]; }
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: 'not found' });

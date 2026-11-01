@@ -310,3 +310,95 @@ test('applyOps is pure: the input is not changed, and checkCreate trims control 
   assert.deepEqual(Object.keys(managedView({ dayPhotos: { x: 1 }, coach: { chat: ['x'] }, workouts: [] })).sort(),
     ['bodyweight', 'customEx', 'customMeasurements', 'measurementEnabled', 'measurements', 'unit', 'weekStart', 'workouts']);
 });
+
+// ---- the whole document, for the ordinary app opened in the client's name ----
+const dataPath = id => `/api/trainer/managed/${id}/data`;
+
+test('the trainer reads and pushes a managed diary as the app syncs it: revisions, stamps, 409', async t => {
+  const { app, who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const { linkId } = (await add(who.coach)).body;
+  const first = await who.coach.get(dataPath(linkId));
+  assert.equal(first.status, 200, first.text);
+  assert.equal(first.body.name, 'Мама');
+  const rev0 = first.body.rev;
+  assert.equal((await who.coach.get(dataPath(linkId) + '/rev')).body.rev, rev0);
+
+  const doc = { ...first.body.state, routines: [{ id: 'r1', name: 'Ноги', ex: [] }], workouts: [workout()],
+    dayPhotos: { [TODAY]: 'abc' }, coach: { memory: 'x' }, customEx: [{ id: 'c1', name: 'Мой', photo: 'h1', media: { a: 1 } }] };
+  const put = await who.coach.put(dataPath(linkId), { state: doc, baseRev: rev0, baseWid: first.body.state._wid });
+  assert.equal(put.status, 200, put.text);
+  assert.equal(put.body.rev, rev0 + 1);
+  assert.ok(put.body.wid);
+
+  const client = app.db().users.find(u => u.managedBy === who.coach.id);
+  const stored = stateOf(app, client.id);
+  assert.equal(stored.routines[0].name, 'Ноги');
+  assert.equal(stored.workouts[0].id, 'w1');
+  assert.ok(!('dayPhotos' in stored) && !('coach' in stored), 'personal keys never stored');
+  assert.ok(!('photo' in stored.customEx[0]) && !('media' in stored.customEx[0]), 'no media references stored');
+  assert.equal((await who.coach.get(dataPath(linkId) + '/rev')).body.rev, rev0 + 1);
+
+  // A stale baseRev is a conflict that carries the current document.
+  const stale = await who.coach.put(dataPath(linkId), { state: doc, baseRev: rev0 });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.rev, rev0 + 1);
+  assert.equal(stale.body.state.workouts[0].id, 'w1');
+  // The checks of PUT /api/data apply: an empty document and a document that is not one are refused.
+  assert.equal((await who.coach.put(dataPath(linkId), { state: {} })).status, 400);
+  assert.equal((await who.coach.put(dataPath(linkId), { state: { workouts: 'x' } })).status, 400);
+  assert.equal((await who.coach.put(dataPath(linkId), {})).status, 400);
+  // The audit records that a document was written, never what was in it.
+  const audit = (await who.coach.get('/api/admin/audit?limit=50').catch(() => ({}))) || {};
+  assert.ok(!JSON.stringify(audit.body || {}).includes('Ноги'));
+});
+
+test('another trainer, a Telegram client, a stranger and a deleted client all read as not there on the document routes', async t => {
+  const { app, who } = await world(t, ['coach', 'other', 'c1']);
+  await makeTrainer(who.coach); await makeTrainer(who.other);
+  const { linkId } = (await add(who.coach)).body;
+  const state = (await who.coach.get(dataPath(linkId))).body.state;
+  const body = { state: { ...state, workouts: [workout({ id: 'evil' })] } };
+  for (const [name, c] of [['other trainer', who.other], ['plain user', who.c1]]) {
+    for (const [m, p, b] of [['get', dataPath(linkId)], ['get', dataPath(linkId) + '/rev'], ['put', dataPath(linkId), body]]) {
+      const r = await c[m](p, b);
+      assert.ok([403, 404].includes(r.status), `${name} ${m} ${p} -> ${r.status}`);
+      if (c === who.other) assert.equal(r.body.code, 'client-gone');
+    }
+  }
+  assert.equal((await who.coach.get(dataPath('does-not-exist-1'))).body.code, 'client-gone');
+  assert.equal((await app.call(dataPath(linkId))).status, 401);
+  assert.equal((await app.call(dataPath(linkId), { method: 'PUT', body })).status, 401);
+  const client = app.db().users.find(u => u.managedBy === who.coach.id);
+  assert.ok(!(stateOf(app, client.id).workouts || []).some(w => w.id === 'evil'), 'nothing was written');
+
+  // A Telegram client's link is not reachable through the managed routes, with a real grant in place.
+  const inv = await who.coach.post('/api/trainer/invites', { days: 7 });
+  const tok = new URL(inv.body.link).searchParams.get('startapp');
+  assert.equal((await who.c1.post('/api/trainer/invites/accept', { token: tok, ageConfirmed: true, grants: { history: true, measures: true, stats: true } })).status, 200);
+  const tgLink = app.db().trainerLinks.find(l => l.clientUid === who.c1.id);
+  for (const [m, p, b] of [['get', dataPath(tgLink.id)], ['put', dataPath(tgLink.id), { state: { workouts: [workout()] } }]]) {
+    const r = await who.coach[m](p, b);
+    assert.equal(r.status, 404, `${m} ${p}`); assert.equal(r.body.code, 'client-gone');
+  }
+  const cf = path.join(app.dir, 'state-' + who.c1.id + '.json');
+  assert.ok(!fs.existsSync(cf) || !(stateOf(app, who.c1.id).workouts || []).length, 'a Telegram client is still read only');
+
+  // After the client is deleted the document routes answer the same.
+  assert.equal((await who.coach.del(`/api/trainer/managed/${linkId}`, { confirm: true })).status, 200);
+  assert.equal((await who.coach.get(dataPath(linkId))).body.code, 'client-gone');
+  assert.equal((await who.coach.put(dataPath(linkId), body)).body.code, 'client-gone');
+});
+
+test('the document writes are rate limited per trainer', async t => {
+  const { who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const { linkId } = (await add(who.coach)).body;
+  const cur = (await who.coach.get(dataPath(linkId))).body;
+  let limited = 0;
+  for (let i = 0; i < 70; i++) {
+    const r = await who.coach.put(dataPath(linkId), { state: { ...cur.state, note: 'n' + i } });
+    if (r.status === 429) limited++;
+  }
+  assert.ok(limited > 0, 'the 61st write in a minute is refused');
+});

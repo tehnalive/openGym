@@ -39,7 +39,8 @@ test('state writes check the Telegram identity header and can notify the chat', 
 for (const route of ['GET /api/trainer/me', 'PUT /api/trainer/me', 'POST /api/trainer/invites', 'GET /api/trainer/invites', 'DELETE /api/trainer/invites/{id}',
   'GET /api/trainer/invites/preview', 'POST /api/trainer/invites/accept', 'GET /api/trainer/clients', 'GET /api/trainer/clients/{id}/data', 'DELETE /api/trainer/links/{id}',
   'POST /api/trainer/managed', 'GET /api/trainer/managed/{id}', 'DELETE /api/trainer/managed/{id}', 'POST /api/trainer/managed/{id}/ops',
-  'GET /api/trainer/managed/{id}/export']) {
+  'GET /api/trainer/managed/{id}/export',
+  'GET /api/trainer/managed/{id}/data', 'PUT /api/trainer/managed/{id}/data', 'GET /api/trainer/managed/{id}/data/rev']) {
   test(`trainer route ${route} exists and is documented`, () => {
     assert.ok(server.includes(`'${route}'`), `${route} missing from server.js`);
     const [method, path] = route.split(' ');
@@ -71,7 +72,8 @@ test('the only client document a trainer writes is a managed one, through commit
   assert.ok(!/atomicWrite|writeState|stateCache/.test(code), 'managed routes write by hand');
   for (const m of code.matchAll(/commitState\(([^,]+),/g)) assert.ok(/^(t\.client|client)$/.test(m[1].trim()), 'commitState on ' + m[1]);
   // Every managed route except the one that creates the profile first resolves the owner's own managed link.
-  for (const key of ["'GET /api/trainer/managed/{id}'", "'POST /api/trainer/managed/{id}/ops'", "'GET /api/trainer/managed/{id}/export'", "'DELETE /api/trainer/managed/{id}'"]) {
+  for (const key of ["'GET /api/trainer/managed/{id}'", "'POST /api/trainer/managed/{id}/ops'", "'GET /api/trainer/managed/{id}/export'", "'DELETE /api/trainer/managed/{id}'",
+    "'GET /api/trainer/managed/{id}/data'", "'PUT /api/trainer/managed/{id}/data'", "'GET /api/trainer/managed/{id}/data/rev'"]) {
     const at = code.indexOf(key);
     assert.ok(at >= 0, key);
     assert.ok(/managedTarget\(req, res, user\)/.test(code.slice(at, at + 700)), key + ' does not call managedTarget');
