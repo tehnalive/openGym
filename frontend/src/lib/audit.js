@@ -139,6 +139,8 @@ const REASONS = {
   'has-trainer': 'the person already has a trainer',
   'no-link': 'no active link with that client',
   'no-managed-link': 'no managed client of the trainer with that id',
+  // What a `trainer.managed.write` changed: the diary saved by the app opened in the client's name (the older operations name their kind).
+  'document': 'the diary was saved from the app opened in the name of the client',
   // What a `media.throttled` pause was for.
   'upload': 'photo and video uploads',
   'sweep': 'clearing unused photos and videos'
