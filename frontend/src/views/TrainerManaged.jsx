@@ -5,23 +5,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText, clientView } from '../lib/trainer.js'
-import { exportFile } from '../lib/trainer-managed.js'
+import { exportFile, saveFile } from '../lib/trainer-managed.js'
 import { openManagedDiary } from '../components/ManagedBar.jsx'
 import { copyLink } from '../lib/plan-link.js'
 import Icon from '../components/Icon.jsx'
 import { confirmSheet } from '../sheets.jsx'
 
 const toast = m => useUI.getState().toast(m)
-
-function save(name, text) {
-  try {
-    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
-    const a = document.createElement('a')
-    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 4000)
-    return true
-  } catch { return false }
-}
 
 export default function TrainerManaged() {
   const { linkId } = useParams()
@@ -41,7 +31,7 @@ export default function TrainerManaged() {
   const exportData = async () => {
     try {
       const file = exportFile(await trainerApi.managedExport(linkId))
-      if (!save(file.name, file.text)) throw new Error('save')
+      if (!saveFile(file.name, file.text)) throw new Error('save')
       toast('Файл сохранён')
     } catch {
       // Some in-app browsers cannot save a file: the same text goes to the clipboard instead.

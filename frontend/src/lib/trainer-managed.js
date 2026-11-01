@@ -95,6 +95,17 @@ export function measureOp(date, values) {
   return { op: { op: 'measurement.set', d: date, values: out } }
 }
 
+/** Save text as a file through the browser; false where it cannot (some in-app browsers). */
+export function saveFile(name, text, type = 'application/json') {
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type }))
+    const a = document.createElement('a')
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 4000)
+    return true
+  } catch { return false }
+}
+
 /** The export as a file the trainer can save: its name and text. The text is the diary itself in the form of the
  *  app's own backup (workouts, routines, body weight, measurements), so the person can load it in Settings → import
  *  once they have the app on a Telegram account of their own. */

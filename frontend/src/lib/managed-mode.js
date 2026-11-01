@@ -112,6 +112,10 @@ export function routeFor(method, path, search, id) {
   if (m === 'GET' && path === '/api/me') return { kind: 'me' }
   if (path === '/api/data' && (m === 'GET' || m === 'PUT')) return { kind: 'rewrite', path: dataBase(id), search }
   if (m === 'GET' && path === '/api/data/rev') return { kind: 'rewrite', path: dataBase(id) + '/rev', search }
+  // The two things the trainer does with this client's data from its settings: a copy, and deleting the diary. Only
+  // for this diary's own id; the same calls for any other id fall through to the refusal below.
+  if (m === 'GET' && path === `/api/trainer/managed/${id}/export`) return { kind: 'pass' }
+  if (m === 'DELETE' && path === `/api/trainer/managed/${id}`) return { kind: 'pass' }
   return { kind: 'block' }
 }
 
@@ -147,6 +151,7 @@ function guardFetch(win, i) {
     const r = routeFor(method, target.path, target.search, i.id)
     if (r.kind === 'block') return Promise.resolve(blockedAnswer())
     if (r.kind === 'me') return Promise.resolve(meAnswer(i))
+    if (r.kind === 'pass') return real(input, init)
     if (r.kind === 'config') {
       return real(input, init).then(async res => {
         let cfg = null

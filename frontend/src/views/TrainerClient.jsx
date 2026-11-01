@@ -15,6 +15,7 @@ import { Segmented } from '../components/ui.jsx'
 import LineChart from '../components/LineChart.jsx'
 import Icon from '../components/Icon.jsx'
 import { confirmSheet } from '../sheets.jsx'
+import ProfileAvatar from '../components/ProfileAvatar.jsx'
 
 const nameOf = e => (EXIDX[e.id] ? exerciseNameFor(EXIDX[e.id]) : (e.n || e.id || 'Упражнение'))
 
@@ -88,12 +89,38 @@ export function Muscles({ view }) {
   </>
 }
 
+// What the client opened for the trainer, since when, and the way to end the link: the client's own screen of it.
+function ClientSettings({ res, linkId, onDone }) {
+  const since = (() => { const d = new Date(res.since); return Number.isNaN(+d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) })()
+  return <>
+    <div className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+      <ProfileAvatar user={{ id: linkId, name: res.name, avatarUrl: res.avatarUrl }} size={48} neutral />
+      <div><div className="tt">{res.name}</div><div className="dim small">{since ? 'Связь с ' + since : 'Подопечный через Telegram'}</div></div>
+    </div>
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="tt" style={{ marginBottom: 6 }}>Что открыто вам</div>
+      {SECTIONS.map(x => <div key={x.key} className="row between" style={{ padding: '6px 0' }}>
+        <span>{x.label}</span><span className={res.grants[x.key] ? '' : 'dim'}>{res.grants[x.key] ? 'открыто' : 'закрыто'}</span></div>)}
+      <div className="dim small" style={{ marginTop: 8, lineHeight: 1.4 }}>{res.name} видит этот доступ у себя и может закрыть его сам. Данные остаются у подопечного.</div>
+    </div>
+    <button className="btn danger" onClick={() => confirmSheet({
+      title: 'Завершить связь?', message: `Вы перестанете видеть данные: ${res.name}. Подопечный сможет пригласить вас снова.`,
+      confirmText: 'Завершить', danger: true,
+      onConfirm: async () => {
+        try { await trainerApi.endLink(linkId); useUI.getState().toast('Связь завершена'); onDone() }
+        catch (e) { useUI.getState().toast(errorText(e)) }
+      },
+    })}>Завершить связь</button>
+  </>
+}
+
 export default function TrainerClient() {
   const { linkId } = useParams()
   const nav = useNavigate()
   const [res, setRes] = useState(null)
   const [error, setError] = useState('')
   const [tab, setTab] = useState(null)
+  const [settings, setSettings] = useState(false)
   useEffect(() => {
     let gone = false
     setRes(null); setError('')
@@ -106,30 +133,21 @@ export default function TrainerClient() {
   const back = () => nav('/trainer')
 
   return <>
-    <div className="hdr"><button className="iconbtn" data-back="/trainer" onClick={back} aria-label="Подопечные"><Icon name="chevronLeft" /></button>
+    <div className="hdr"><button className="iconbtn" data-back="/trainer" onClick={settings ? () => setSettings(false) : back} aria-label={settings ? 'Назад' : 'Подопечные'}><Icon name="chevronLeft" /></button>
       <div style={{ flex: 1, marginInlineStart: 12 }}><h1>{res?.name || 'Подопечный'}</h1>
-        <div className="sub">Только просмотр</div></div></div>
+        <div className="sub">{settings ? 'Настройки' : 'Только просмотр'}</div></div>
+      {res && !settings && <button className="iconbtn" onClick={() => setSettings(true)} aria-label="Настройки"><Icon name="gear" /></button>}</div>
     {error && <>
       <div role="alert" className="small" style={{ color: 'var(--red)', marginBottom: 12, lineHeight: 1.4 }}>{error}</div>
       <button className="btn" onClick={() => { useUI.getState().toast('Доступ закрыт'); back() }}>К списку</button>
     </>}
-    {res && <>
+    {res && settings && <ClientSettings res={res} linkId={linkId} onDone={back} />}
+    {res && !settings && <>
       {tabs.length > 1 && <Segmented className="seg-range" value={tab} onChange={setTab} options={tabs.map(s => ({ value: s.key, label: s.short }))} />}
       <div style={{ height: 10 }} />
       {tab === 'history' && <History view={view} />}
       {tab === 'measures' && <Measures view={view} />}
       {tab === 'stats' && <Muscles view={view} />}
-      <div className="dim small" style={{ margin: '18px 0 8px', lineHeight: 1.4 }}>
-        {res.name} видит этот доступ в настройках и может закрыть его сам. Данные подопечного остаются у него.
-      </div>
-      <button className="btn danger" onClick={() => confirmSheet({
-        title: 'Завершить связь?', message: `Вы перестанете видеть данные: ${res.name}. Подопечный сможет пригласить вас снова.`,
-        confirmText: 'Завершить', danger: true,
-        onConfirm: async () => {
-          try { await trainerApi.endLink(linkId); useUI.getState().toast('Связь завершена'); back() }
-          catch (e) { useUI.getState().toast(errorText(e)) }
-        },
-      })}>Завершить связь</button>
     </>}
   </>
 }

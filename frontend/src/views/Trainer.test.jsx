@@ -139,9 +139,9 @@ describe('TrainerClient', () => {
     for (const label of ['Замеры', 'Мышцы', 'История']) click([...host.querySelectorAll('.seg button')].find(b => b.textContent === label))
     click(host.querySelector('.item [role=button]'))   // open a workout
     expect(host.querySelectorAll('input, textarea, select, [contenteditable]').length).toBe(0)
-    // the only button that changes anything is ending the link; every request made was a GET of this client's data
+    // the main screen has nothing that changes anything: ending the link moved to the settings screen
     const labels = [...host.querySelectorAll('button')].map(b => b.textContent).filter(Boolean)
-    expect(labels.filter(l => /Завершить связь/.test(l))).toHaveLength(1)
+    expect(labels.some(l => /Завершить связь/.test(l))).toBe(false)
     expect(labels.some(l => /Сохранить|Добавить|Записать|Изменить|Удалить/.test(l))).toBe(false)
     expect(mocks.api.mock.calls.every(([p, init]) => p.startsWith('/api/trainer/clients/') && (!init || !init.method || init.method === 'GET'))).toBe(true)
   })
@@ -169,9 +169,25 @@ describe('TrainerClient', () => {
       : apiFor({ '/api/trainer/clients/link-aaaa-1/data': DATA({ history: true, measures: false, stats: false }) })(path))
     const host = mount(routes, '/trainer/link-aaaa-1')
     await flush()
+    click(host.querySelector('[aria-label="Настройки"]'))
     click([...host.querySelectorAll('button')].find(b => b.textContent === 'Завершить связь'))
     const sheet = useUI.getState().sheets.at(-1)
     expect(sheet).toBeTruthy()
     expect(mocks.api.mock.calls.some(([, i]) => i?.method === 'DELETE')).toBe(false)
+  })
+
+  it('has the settings: what is open, since when, and the one place to end the link', async () => {
+    const data = DATA({ history: true, measures: false, stats: false })
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/clients/link-aaaa-1/data': { ...data, avatarUrl: 'https://t.me/i/userpic/320/a.jpg', since: '2026-10-31T10:00:00Z' } }))
+    const host = mount(routes, '/trainer/link-aaaa-1')
+    await flush()
+    expect(host.textContent).not.toContain('Что открыто вам')
+    click(host.querySelector('[aria-label="Настройки"]'))
+    expect(host.textContent).toContain('Что открыто вам')
+    expect(host.textContent).toMatch(/Связь с 31 октября 2026/)
+    expect(host.textContent).toMatch(/История тренировок.{0,2}открыто/)
+    expect(host.textContent).toMatch(/Замеры и вес.{0,2}закрыто/)
+    expect(host.querySelector('.sp-avatar img').getAttribute('src')).toBe('https://t.me/i/userpic/320/a.jpg')
+    expect([...host.querySelectorAll('button')].filter(b => b.textContent === 'Завершить связь')).toHaveLength(1)
   })
 })

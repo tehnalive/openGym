@@ -45,6 +45,14 @@ describe('routeFor', () => {
       ['DELETE', '/api/data'], ['POST', '/api/data'], ['GET', '/api/admin/users'], ['POST', '/api/account/delete'], ['GET', '/api/telegram/notifications']]
     for (const [m, p] of refused) expect(routeFor(m, p, '', ID).kind, m + ' ' + p).toBe('block')
   })
+  it('lets through the export and the deleting of this diary only, never the diary of another client', () => {
+    expect(routeFor('GET', `/api/trainer/managed/${ID}/export`, '', ID).kind).toBe('pass')
+    expect(routeFor('DELETE', `/api/trainer/managed/${ID}`, '', ID).kind).toBe('pass')
+    expect(routeFor('GET', '/api/trainer/managed/otherlink12/export', '', ID).kind).toBe('block')
+    expect(routeFor('DELETE', '/api/trainer/managed/otherlink12', '', ID).kind).toBe('block')
+    expect(routeFor('POST', `/api/trainer/managed/${ID}/ops`, '', ID).kind).toBe('block')
+    expect(routeFor('GET', `/api/trainer/managed/${ID}`, '', ID).kind).toBe('block')
+  })
 })
 
 describe('the storage guard', () => {
