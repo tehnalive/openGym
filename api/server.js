@@ -2400,6 +2400,12 @@ function dataWritable() {
   return ok;
 }
 
+// The Telegram picture of a client who signed in with Telegram, for the trainer of an active link only (the client's
+// consent screen names it). Never for a managed client, who has none; the URL is checked again here as everywhere.
+function clientAvatar(client, link) {
+  const url = link.managed || !client.telegramId ? '' : telegramPhotoUrl(client.telegramPhotoUrl);
+  return url ? { avatarUrl: url } : {};
+}
 // The write behind PUT /api/data, for the document `body.state` of `user` (body: state, baseRev, baseWid, stamped).
 // Returns { status, body } for the caller to send. The trainer's writes to a managed client (TG14) go through
 // here too, so a client document is only ever changed by one set of revision, stamp and conflict rules.
@@ -2715,7 +2721,7 @@ const routes = {
       const client = db.users.find(u => u.id === link.clientUid);
       if (!client || client.disabled) continue;
       const S = readStateStrict(client.id);
-      clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants,
+      clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants, ...clientAvatar(client, link),
         ...(link.managed ? { managed: true, note: link.note || '' } : {}),
         ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}) });
     }
@@ -2738,7 +2744,7 @@ const routes = {
     if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Данные подопечного сейчас не читаются, попробуйте позже');
     const now = Date.now();
     if (!(trainerReadNoted.get(link.id) > now - 600000)) { trainerReadNoted.set(link.id, now); audit(req, 'trainer.read', { user, target: client }); }
-    json(res, 200, { linkId: link.id, name: displayName(client), grants: link.grants, since: link.consentAt, data: trimForTrainer(S || {}, link.grants) });
+    json(res, 200, { linkId: link.id, name: displayName(client), ...clientAvatar(client, link), grants: link.grants, since: link.consentAt, data: trimForTrainer(S || {}, link.grants) });
   },
   // Managed clients (TG14): a diary the trainer keeps for someone without Telegram. A profile with no way in
   // (isManaged: sessionUser refuses it); every route here is the owning trainer's, and anything else reads as

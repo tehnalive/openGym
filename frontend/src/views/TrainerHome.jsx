@@ -9,6 +9,7 @@ import { takeManagedNotice } from '../lib/managed-mode.js'
 import { openManagedDiary } from '../components/ManagedBar.jsx'
 import { Button, Section, Row, Check, TextField, Segmented } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
+import ProfileAvatar from '../components/ProfileAvatar.jsx'
 
 const toast = m => useUI.getState().toast(m)
 // A Telegram client opens the read-only view; a client without Telegram opens as the ordinary app, in their name.
@@ -77,7 +78,8 @@ export default function TrainerHome() {
     {clients && (clients.length
       ? <div className="list">{clients.map(c => <div key={c.linkId} className="item" role="button" tabIndex={0}
         onClick={() => openClient(c, nav)} onKeyDown={e => { if (e.key === 'Enter') openClient(c, nav) }}>
-        <span className="lrow-i" style={{ width: 34, height: 34, borderRadius: 8 }}><Icon name="personCircle" /></span>
+        {/* The client's Telegram picture, else the initial on a grey disc; a client without Telegram has the initial only. */}
+        <ProfileAvatar user={{ id: c.linkId, name: c.name, avatarUrl: c.avatarUrl }} size={38} neutral />
         <div className="grow"><div className="tt">{c.name}</div>
           <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div></div>
         {c.managed && <button className="iconbtn" aria-label={'Данные подопечного: ' + c.name} title="Данные, скачать, удалить"

@@ -145,3 +145,40 @@ describe('the data of a managed client', () => {
     expect(host.textContent).not.toContain('Ноги')
   })
 })
+
+describe('avatars in the cabinet', () => {
+  it('shows the Telegram picture, else the initial on a grey disc; a managed client has the initial only', async () => {
+    const list = { limit: 5, clients: [
+      { linkId: 'link-tg-0001', name: 'Мария', since: '2026-10-30T00:00:00Z', grants: { history: true, measures: false, stats: false }, avatarUrl: 'https://t.me/i/userpic/320/m.jpg' },
+      { linkId: 'link-tg-0002', name: 'Олег', since: '2026-10-30T00:00:00Z', grants: { history: true, measures: false, stats: false } },
+      { linkId: 'link-mmmm-1', name: 'Мама', managed: true, since: '2026-10-30T00:00:00Z', grants: { history: true, measures: true, stats: true } },
+    ] }
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/me': ME, 'GET /api/trainer/clients': list }))
+    const host = mount('/trainer')
+    await flush()
+    const rows = [...host.querySelectorAll('.item')]
+    const avatar = name => rows.find(r => r.textContent.includes(name)).querySelector('.sp-avatar')
+    expect(avatar('Мария').querySelector('img').getAttribute('src')).toBe('https://t.me/i/userpic/320/m.jpg')
+    expect(avatar('Олег').querySelector('img')).toBeNull()
+    expect(avatar('Олег').textContent).toBe('О')
+    expect(avatar('Олег').className).toContain('neutral')
+    expect(avatar('Мама').querySelector('img')).toBeNull()
+    expect(avatar('Мама').textContent).toBe('М')
+  })
+
+  it('falls back to the initial when the picture does not load, and refuses a picture from another host', async () => {
+    const list = { limit: 5, clients: [
+      { linkId: 'link-tg-0001', name: 'Мария', since: '2026-10-30T00:00:00Z', grants: { history: true, measures: false, stats: false }, avatarUrl: 'https://t.me/i/userpic/320/m.jpg' },
+      { linkId: 'link-tg-0002', name: 'Олег', since: '2026-10-30T00:00:00Z', grants: { history: true, measures: false, stats: false }, avatarUrl: 'https://evil.example/x.jpg' },
+    ] }
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/me': ME, 'GET /api/trainer/clients': list }))
+    const host = mount('/trainer')
+    await flush()
+    const rows = [...host.querySelectorAll('.item')]
+    const img = rows[0].querySelector('.sp-avatar img')
+    await act(async () => { img.dispatchEvent(new Event('error')) })
+    expect(rows[0].querySelector('.sp-avatar img')).toBeNull()
+    expect(rows[0].querySelector('.sp-avatar').textContent).toBe('М')
+    expect(rows[1].querySelector('.sp-avatar img')).toBeNull()
+  })
+})

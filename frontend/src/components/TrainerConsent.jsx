@@ -48,6 +48,9 @@ export function TrainerConsent({ token, preview, close, onAccepted }) {
         </div>
       })}
     </div>
+    <div className="small" style={{ marginBottom: 8, lineHeight: 1.4 }}>
+      Тренер видит имя и фото вашего профиля Telegram.
+    </div>
     <div className="small" style={{ marginBottom: 12, lineHeight: 1.4 }}>
       Не увидит никогда: фото прогресса, чат с AI-коучем, настройки, ваш Telegram ID.
     </div>

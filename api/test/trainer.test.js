@@ -19,9 +19,11 @@ const TG = { coach: 4_600_000_001, c1: 4_600_000_011, c2: 4_600_000_012, c3: 4_6
 const NAMES = { coach: 'Ирина', c1: 'Вася', c2: 'Петя', c3: 'Коля', c4: 'Саша', c5: 'Дима', c6: 'Лёша', other: 'Олег', stranger: 'Чужой' };
 const GRANTS = { history: true, measures: true, stats: true };
 
+// Telegram pictures by Telegram id, for the avatar tests; a login without an entry sends none.
+const PHOTOS = {};
 function initData(id, name) {
   const fields = new Map([
-    ['user', JSON.stringify({ id, first_name: name, username: 'handle_' + id })],
+    ['user', JSON.stringify({ id, first_name: name, username: 'handle_' + id, ...(PHOTOS[id] ? { photo_url: PHOTOS[id] } : {}) })],
     ['query_id', 'test-query'], ['auth_date', String(Math.floor(Date.now() / 1000))],
   ]);
   const check = [...fields].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${k}=${v}`).join('\n');
@@ -310,4 +312,34 @@ test('the audit log has the trainer events and no values, and invitations are bu
   await makeTrainer(w2.coach);
   for (let i = 0; i < 10; i++) assert.equal((await w2.coach.post('/api/trainer/invites', {})).status, 200);
   assert.equal((await w2.coach.post('/api/trainer/invites', {})).status, 429);
+});
+
+test('the trainer gets the Telegram picture of a client with an active link, and of nobody else', async t => {
+  PHOTOS[TG.c1] = 'https://t.me/i/userpic/320/abc123.jpg';
+  PHOTOS[TG.c2] = 'https://evil.example/pic.jpg';
+  PHOTOS[TG.stranger] = 'https://cdn5.telegram-cdn.org/file/xyz.jpg';
+  t.after(() => { delete PHOTOS[TG.c1]; delete PHOTOS[TG.c2]; delete PHOTOS[TG.stranger]; });
+  const { app, who } = await world(t, ['coach', 'c1', 'c2', 'other', 'stranger']);
+  await makeTrainer(who.coach); await makeTrainer(who.other);
+  const l1 = await link(who.coach, who.c1, { history: true, measures: false, stats: false });
+  const l2 = await link(who.coach, who.c2, { history: true, measures: false, stats: false });
+  const l3 = await link(who.coach, who.stranger, { history: true, measures: false, stats: false });
+  const made = await who.coach.post('/api/trainer/managed', { name: 'Мама', ageConfirmed: true });
+  const list = (await who.coach.get('/api/trainer/clients')).body.clients;
+  assert.equal(list.find(c => c.linkId === l1).avatarUrl, 'https://t.me/i/userpic/320/abc123.jpg');
+  assert.equal(list.find(c => c.linkId === l2).avatarUrl, undefined, 'a picture from another host is never kept or sent');
+  assert.equal(list.find(c => c.linkId === l3).avatarUrl, 'https://cdn5.telegram-cdn.org/file/xyz.jpg');
+  assert.equal(list.find(c => c.linkId === made.body.linkId).avatarUrl, undefined, 'a managed client has none');
+  assert.equal((await who.coach.get('/api/trainer/clients/' + l1 + '/data')).body.avatarUrl, 'https://t.me/i/userpic/320/abc123.jpg');
+  // Another trainer sees nothing of it, and neither does the client list of a trainer without a link.
+  assert.equal((await who.other.get('/api/trainer/clients')).body.clients.length, 0);
+  assert.equal((await who.other.get('/api/trainer/clients/' + l1 + '/data')).status, 404);
+  // Once the link ends the picture is no longer served to the trainer.
+  assert.equal((await who.c1.del('/api/trainer/links/' + l1)).status, 200);
+  assert.ok(!(await who.coach.get('/api/trainer/clients')).body.clients.some(c => c.linkId === l1));
+  assert.equal((await who.coach.get('/api/trainer/clients/' + l1 + '/data')).status, 404);
+  // The profile keeps only a checked URL, refreshed at every login.
+  const db = app.db();
+  assert.equal(db.users.find(u => u.id === who.c1.id).telegramPhotoUrl, 'https://t.me/i/userpic/320/abc123.jpg');
+  assert.ok(!db.users.find(u => u.id === who.c2.id).telegramPhotoUrl);
 });

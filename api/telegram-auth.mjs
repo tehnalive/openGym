@@ -77,7 +77,7 @@ export function telegramPhotoUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && !url.username && !url.password && !url.port
-      && /(^|\.)(t\.me|telegram\.org)$/.test(url.hostname)
+      && /(^|\.)(t\.me|telegram\.org|telegram-cdn\.org)$/.test(url.hostname)
       && !/(^|\.)api\.telegram\.org$/.test(url.hostname) ? url.href : '';
   } catch { return ''; }
 }
