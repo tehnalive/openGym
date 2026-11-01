@@ -73,7 +73,7 @@ describe('adding a client', () => {
     click(button(host, 'Добавить подопечного'))
     expect(button(host, 'Через Telegram')).toBeTruthy(); expect(button(host, 'У него нет Telegram')).toBeTruthy()
     click([...host.querySelectorAll('.item')].find(x => x.textContent.includes('Мама')))
-    expect(mocks.enter).toHaveBeenCalledWith('link-mmmm-1', 'Мама')
+    expect(mocks.enter).toHaveBeenCalledWith('link-mmmm-1', 'Мама', expect.any(String))
     expect(where(host)).toBe('/trainer')
     click(host.querySelector('[aria-label="Данные подопечного: Мама"]'))
     expect(where(host)).toBe('/trainer/m/link-mmmm-1')
@@ -92,7 +92,7 @@ describe('adding a client', () => {
     click(create()); await flush()
     const call = mocks.api.mock.calls.find(([p, i]) => p === '/api/trainer/managed' && i?.method === 'POST')
     expect(JSON.parse(call[1].body)).toEqual({ name: 'Дед', note: '', unit: 'kg', ageConfirmed: true })
-    expect(mocks.enter).toHaveBeenCalledWith('link-new-22', 'Дед')
+    expect(mocks.enter).toHaveBeenCalledWith('link-new-22', 'Дед', expect.any(String))
   })
 
   it('shows a refusal such as the client limit', async () => {
@@ -122,7 +122,7 @@ describe('the data of a managed client', () => {
     expect(button(host, 'Записать тренировку')).toBeFalsy()
     expect(host.querySelector('input')).toBeNull()
     click(button(host, 'Открыть дневник'))
-    expect(mocks.enter).toHaveBeenCalledWith('link-mmmm-1', 'Мама')
+    expect(mocks.enter).toHaveBeenCalledWith('link-mmmm-1', 'Мама', expect.any(String))
     expect(JSON.stringify(useStore.getState().S)).toBe(before)
     expect(localStorage.length).toBe(0)
   })

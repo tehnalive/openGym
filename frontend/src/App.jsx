@@ -29,7 +29,7 @@ import { installViewportGuard } from './lib/viewport-guard.js'
 import { installChipDrag } from './lib/hchips.js'
 import { syncPushSubscription } from './lib/push.js'
 import { MOBILE, nativePlatform } from './lib/mobile.js'
-import { isManagedMode, leaveManagedMode } from './lib/managed-mode.js'
+import { isManagedMode, managedInfo, shownLang, leaveManagedMode } from './lib/managed-mode.js'
 import { loadTelegram, prepareTelegram } from './lib/telegram.js'
 import { DEMO } from './lib/demo.js'
 import { exitWorkoutEdit, startFlow, beginWorkout } from './sheets.jsx'
@@ -177,7 +177,8 @@ function Shell() {
   // A profile that never picked a language follows the instance default or the browser (#303) —
   // worked out here, on this device, and never written into the synced state (lib/default-lang.js).
   const config = useStore(s => s.config)
-  const lang = effectiveLang(S, config)
+  // A client's diary speaks the trainer's language (the flag from the cabinet), never the client's empty document's.
+  const lang = managed ? shownLang(managedInfo(), effectiveLang(S, config)) : effectiveLang(S, config)
   useEffect(() => { setLang(lang, S.enParens?.[baseLang(lang)] ?? true, S.enOnly?.[baseLang(lang)] === true) }, [lang, S.enParens, S.enOnly])
   // Same shape as the language: a module-level display setting, pushed when it changes (#139).
   useEffect(() => { setWeightDecimals(S.wdec) }, [S.wdec])

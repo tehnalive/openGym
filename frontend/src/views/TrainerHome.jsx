@@ -5,13 +5,14 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText, grantsText, daysSince, ago } from '../lib/trainer.js'
 import { sendLink, copyLink } from '../lib/plan-link.js'
-import { enterManagedMode, takeManagedNotice } from '../lib/managed-mode.js'
+import { takeManagedNotice } from '../lib/managed-mode.js'
+import { openManagedDiary } from '../components/ManagedBar.jsx'
 import { Button, Section, Row, Check, TextField, Segmented } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
 
 const toast = m => useUI.getState().toast(m)
 // A Telegram client opens the read-only view; a client without Telegram opens as the ordinary app, in their name.
-const openClient = (c, nav) => { if (c.managed) enterManagedMode(c.linkId, c.name); else nav('/trainer/' + c.linkId) }
+const openClient = (c, nav) => { if (c.managed) openManagedDiary(c.linkId, c.name); else nav('/trainer/' + c.linkId) }
 const inviteText = 'Приглашаю вас в Жимолость: откройте ссылку, и я смогу смотреть ваш дневник тренировок. Вы сами решите, что мне открыть, и сможете закрыть доступ в любой момент.'
 const when = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) }
 
@@ -43,7 +44,7 @@ export default function TrainerHome() {
     try {
       const made = await trainerApi.addManaged({ name: form.name, note: form.note, unit: form.unit, ageConfirmed: form.age })
       toast('Подопечный добавлен')
-      if (!enterManagedMode(made.linkId, made.name)) nav('/trainer/m/' + made.linkId)
+      if (!openManagedDiary(made.linkId, made.name)) nav('/trainer/m/' + made.linkId)
     } catch (e) { setError(errorText(e)) }
     finally { setBusy(false) }
   }

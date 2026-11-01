@@ -72,7 +72,7 @@ export default function TabBar({ onStart }) {
       <Tab active={on('stats')} icon="chart" label={t('Stats')} onClick={() => switchTab('/stats')} />
       {/* In a client's diary opened by the trainer the exercise library is not there; the way back to the cabinet is. */}
       {isManagedMode()
-        ? <Tab active={false} icon="personCircle" label="К подопечным" onClick={leaveManagedDiary} />
+        ? <Tab active={false} icon="chevronLeft" label="К подопечным" onClick={leaveManagedDiary} />
         : <Tab active={on('library')} icon="dumbbell" label={t('Exercises')} onClick={() => switchTab('/library')} />}
     </nav>
   )

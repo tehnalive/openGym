@@ -1,10 +1,17 @@
-// The bar over a client's diary opened by their trainer (lib/managed-mode.js): whose diary this is, whether
-// it has reached the server, and the way back to the cabinet. Russian only, like the other trainer screens.
+// The bar over a client's diary opened by their trainer (lib/managed-mode.js): whose diary this is and whether
+// it has reached the server. The way back to the cabinet is the last tab (components/TabBar.jsx). Russian only, like the other trainer screens.
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
-import { managedInfo, leaveManagedMode } from '../lib/managed-mode.js'
+import { managedInfo, leaveManagedMode, enterManagedMode } from '../lib/managed-mode.js'
+import { effectiveLang } from '../lib/default-lang.js'
 import { confirmSheet } from '../sheets.jsx'
+
+/** Open a client's diary from the cabinet, in the language the trainer's own app speaks now. */
+export function openManagedDiary(id, name) {
+  const { S, config } = useStore.getState()
+  return enterManagedMode(id, name, effectiveLang(S, config))
+}
 
 /** Back to the cabinet, without losing anything quietly: what is owed is sent first, a workout that is
  *  still running is named before leaving it (it stays on this device, in this diary, and is there on return). */
@@ -51,11 +58,8 @@ export default function ManagedBar() {
   const trouble = !!sync && (sync.offline || sync.status === 'error' || sync.status === 'auth' || !!sync.lastError)
   const saving = !!sync && !trouble && (sync.status === 'pending' || sync.pending)
   return <div ref={ref} className="managed-bar" role="status">
-    <div className="managed-bar-text">
-      <strong>Дневник: {info?.name || 'подопечного'}</strong>
-      <span className="managed-bar-sub">{trouble ? 'Нет связи: изменения пока на этом устройстве' : saving ? 'Сохраняется…' : 'Всё, что вы запишете, попадёт в этот дневник'}</span>
-    </div>
-    <button type="button" className="managed-bar-btn" onClick={leaveManagedDiary}>К подопечным</button>
+    <strong>Дневник: {info?.name || 'подопечного'}</strong>
+    {(trouble || saving) && <span className="managed-bar-sub">{trouble ? 'Нет связи, изменения пока на устройстве' : 'Сохраняется…'}</span>}
   </div>
 }
 

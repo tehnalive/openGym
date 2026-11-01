@@ -1,7 +1,7 @@
 // Managed mode (TG14): the trainer's app opened in a client's name must not touch the trainer's own storage and
 // must not reach any API route but the client's diary. Run against a fake window, so the guards are the real ones.
 import { describe, it, expect, vi } from 'vitest'
-import { routeFor, scoped, detect, installManagedGuards, apiPathOf, managedConfig, enterManagedMode, leaveManagedMode, takeManagedNotice, MANAGED_PREFIX } from './managed-mode.js'
+import { shownLang, routeFor, scoped, detect, installManagedGuards, apiPathOf, managedConfig, enterManagedMode, leaveManagedMode, takeManagedNotice, MANAGED_PREFIX } from './managed-mode.js'
 
 const ID = 'gDzEuZgmpoBd'
 
@@ -191,15 +191,26 @@ describe('the network guard', () => {
   })
 })
 
+describe('the language of the diary', () => {
+  it('is the language of the trainer, and the pick of the app only when none was carried', () => {
+    expect(shownLang({ id: ID, name: '', lang: 'ru' }, 'en')).toBe('ru')
+    expect(shownLang({ id: ID, name: '', lang: '' }, 'de')).toBe('de')
+    expect(shownLang(null, 'en')).toBe('en')
+  })
+})
+
 describe('entering and leaving', () => {
   it('detect() takes ?as= once, keeps the flag, and ignores a bad id', () => {
     const win = fakeWindow({ href: `https://gym.example/?as=${ID}#/home` })
-    expect(detect(win)).toEqual({ id: ID, name: '' })
+    expect(detect(win)).toEqual({ id: ID, name: '', lang: '' })
     expect(JSON.parse(win.sessionStorage.getItem('gym_as')).id).toBe(ID)
     expect(win.history.replaceState).toHaveBeenCalled()
     expect(win.history.replaceState.mock.calls[0][2]).toBe('/#/home')
-    const again = fakeWindow(); again.sessionStorage.setItem('gym_as', JSON.stringify({ id: ID, name: 'Мама' }))
-    expect(detect(again)).toEqual({ id: ID, name: 'Мама' })
+    const again = fakeWindow(); again.sessionStorage.setItem('gym_as', JSON.stringify({ id: ID, name: 'Мама', lang: 'ru' }))
+    expect(detect(again)).toEqual({ id: ID, name: 'Мама', lang: 'ru' })
+    // A language that is not a tag is dropped, not trusted.
+    const odd = fakeWindow(); odd.sessionStorage.setItem('gym_as', JSON.stringify({ id: ID, name: 'x', lang: '<script>' }))
+    expect(detect(odd).lang).toBe('')
     expect(detect(fakeWindow({ href: 'https://gym.example/?as=../../x' }))).toBeNull()
     expect(detect(fakeWindow())).toBeNull()
     const bad = fakeWindow(); bad.sessionStorage.setItem('gym_as', '{"id":"short"}')
@@ -208,9 +219,9 @@ describe('entering and leaving', () => {
 
   it('enterManagedMode sets the flag and loads the page again with ?as=; leaving clears it and loads again', () => {
     const win = fakeWindow({ href: 'https://gym.example/app/#/trainer' })
-    expect(enterManagedMode('bad id', 'x', win)).toBe(false)
-    expect(enterManagedMode(ID, 'Мама', win)).toBe(true)
-    expect(JSON.parse(win.sessionStorage.getItem('gym_as'))).toEqual({ id: ID, name: 'Мама' })
+    expect(enterManagedMode('bad id', 'x', 'ru', win)).toBe(false)
+    expect(enterManagedMode(ID, 'Мама', 'ru', win)).toBe(true)
+    expect(JSON.parse(win.sessionStorage.getItem('gym_as'))).toEqual({ id: ID, name: 'Мама', lang: 'ru' })
     expect(win.location.assign).toHaveBeenLastCalledWith(`/app/?as=${ID}#/home`)
     leaveManagedMode('Не открылось', win)
     expect(win.sessionStorage.getItem('gym_as')).toBeNull()

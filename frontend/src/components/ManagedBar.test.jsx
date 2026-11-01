@@ -4,17 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 
-const mocks = vi.hoisted(() => ({ leave: vi.fn() }))
+const mocks = vi.hoisted(() => ({ leave: vi.fn(), enter: vi.fn(() => true) }))
 vi.mock('../lib/managed-mode.js', async importOriginal => ({
   ...(await importOriginal()),
   isManagedMode: () => true,
   managedInfo: () => ({ id: 'gDzEuZgmpoBd', name: 'Мама' }),
   leaveManagedMode: mocks.leave,
+  enterManagedMode: mocks.enter,
 }))
 
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
-import ManagedBar, { leaveManagedDiary } from './ManagedBar.jsx'
+import ManagedBar, { leaveManagedDiary, openManagedDiary } from './ManagedBar.jsx'
 import TabBar from './TabBar.jsx'
 
 const mounted = []
@@ -31,7 +32,7 @@ let push, owed
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  mocks.leave.mockReset()
+  mocks.leave.mockReset(); mocks.enter.mockClear()
   useUI.setState({ sheets: [], toastMsg: '' })
   push = vi.fn(async () => {})
   owed = false
@@ -45,6 +46,8 @@ describe('the bar over a client\'s diary', () => {
   it('says whose diary it is and takes the room it needs', () => {
     const host = mount(<ManagedBar />)
     expect(host.querySelector('.managed-bar').textContent).toContain('Дневник: Мама')
+    // The way back is the last tab, not a button of the bar.
+    expect(host.querySelector('.managed-bar button')).toBeNull()
     expect(document.documentElement.style.getPropertyValue('--conn')).not.toBe('')
   })
 
@@ -72,6 +75,14 @@ describe('the bar over a client\'s diary', () => {
   })
 })
 
+describe('opening a diary', () => {
+  it('carries the language the app of the trainer speaks now, not a stored default', () => {
+    useStore.setState(s => ({ S: { ...s.S, lang: 'ru', langAuto: false }, config: null }))
+    expect(openManagedDiary('gDzEuZgmpoBd', 'Мама')).toBe(true)
+    expect(mocks.enter).toHaveBeenCalledWith('gDzEuZgmpoBd', 'Мама', 'ru')
+  })
+})
+
 describe('the tab bar in a client\'s diary', () => {
   it('has no exercise library, and ends with the way back', async () => {
     const host = mount(<TabBar onStart={() => {}} />)
@@ -79,6 +90,7 @@ describe('the tab bar in a client\'s diary', () => {
     const labels = [...host.querySelectorAll('#tabbar button')].map(b => b.textContent.trim())
     expect(labels.some(l => /Exercises/i.test(l))).toBe(false)
     expect(labels[labels.length - 1]).toContain('К подопечным')
+    expect(host.querySelector('#tabbar button:last-child svg')).toBeTruthy()
     click(button(host, 'К подопечным'))
     await flush()
     expect(mocks.leave).toHaveBeenCalledTimes(1)

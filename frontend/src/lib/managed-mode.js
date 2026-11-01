@@ -37,7 +37,9 @@ export const managedUserId = id => 'managed-' + id
 function parseFlag(raw) {
   try {
     const v = JSON.parse(raw)
-    if (v && typeof v.id === 'string' && ID_RE.test(v.id)) return { id: v.id, name: typeof v.name === 'string' ? v.name.slice(0, 40) : '' }
+    if (v && typeof v.id === 'string' && ID_RE.test(v.id)) {
+      return { id: v.id, name: typeof v.name === 'string' ? v.name.slice(0, 40) : '', lang: typeof v.lang === 'string' && /^[A-Za-z-]{2,10}$/.test(v.lang) ? v.lang : '' }
+    }
   } catch { /* no flag */ }
   return null
 }
@@ -54,7 +56,7 @@ export function detect(win) {
   let stored = null
   try { stored = parseFlag(ss.getItem(FLAG)) } catch { /* unreadable: not managed */ }
   const asId = new URLSearchParams(win.location.search).get('as')
-  const found = asId && ID_RE.test(asId) ? { id: asId, name: stored && stored.id === asId ? stored.name : '' } : stored
+  const found = asId && ID_RE.test(asId) ? { id: asId, name: stored && stored.id === asId ? stored.name : '', lang: stored && stored.id === asId ? stored.lang : '' } : stored
   if (asId) {
     // The parameter is only a way in: it comes off the address so a reload or a shared link does not carry it.
     try {
@@ -67,10 +69,15 @@ export function detect(win) {
   return found
 }
 
-/** From the cabinet: open this client's diary in the app. */
-export function enterManagedMode(id, name, win = window) {
+/** The language a diary opened by the trainer is shown in: the trainer's, carried in the flag; else what the app would pick. */
+export const shownLang = (i, fallback) => (i && i.lang) || fallback
+
+/** From the cabinet: open this client's diary in the app. `lang` is the trainer's own interface language, worked out
+ *  in the trainer's world before leaving it: the diary is shown in it, and neither the client's document nor the
+ *  trainer's settings are written with it. */
+export function enterManagedMode(id, name, lang, win = window) {
   if (!ID_RE.test(String(id))) return false
-  try { win.sessionStorage.setItem(FLAG, JSON.stringify({ id, name: String(name || '').slice(0, 40) })) } catch { return false }
+  try { win.sessionStorage.setItem(FLAG, JSON.stringify({ id, name: String(name || '').slice(0, 40), lang: typeof lang === 'string' ? lang : '' })) } catch { return false }
   win.location.assign(baseOf(win.location) + '?as=' + encodeURIComponent(id) + '#/home')
   return true
 }
