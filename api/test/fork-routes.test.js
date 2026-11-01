@@ -40,7 +40,8 @@ for (const route of ['GET /api/trainer/me', 'PUT /api/trainer/me', 'POST /api/tr
   'GET /api/trainer/invites/preview', 'POST /api/trainer/invites/accept', 'GET /api/trainer/clients', 'GET /api/trainer/clients/{id}/data', 'DELETE /api/trainer/links/{id}',
   'POST /api/trainer/managed', 'GET /api/trainer/managed/{id}', 'DELETE /api/trainer/managed/{id}', 'POST /api/trainer/managed/{id}/ops',
   'GET /api/trainer/managed/{id}/export',
-  'GET /api/trainer/managed/{id}/data', 'PUT /api/trainer/managed/{id}/data', 'GET /api/trainer/managed/{id}/data/rev']) {
+  'GET /api/trainer/managed/{id}/data', 'PUT /api/trainer/managed/{id}/data', 'GET /api/trainer/managed/{id}/data/rev',
+  'GET /api/trainer/clients/{id}/doc', 'GET /api/trainer/clients/{id}/doc/rev']) {
   test(`trainer route ${route} exists and is documented`, () => {
     assert.ok(server.includes(`'${route}'`), `${route} missing from server.js`);
     const [method, path] = route.split(' ');
@@ -60,9 +61,10 @@ test('trainer mode is read only: no trainer route writes a client document', () 
   assert.ok(mStart > start && mEnd > mStart);
   const code = server.slice(start, mStart) + server.slice(mEnd, end);
   assert.ok(!/stateFile|atomicWrite|writeState|stateCache|commitState/.test(code), 'a trainer route touches a state file');
-  // The only client route is the one read; nothing else addresses /api/trainer/clients.
+  // The client routes are reads only (the list, the trimmed data, and the same as the app's document); nothing else, and no PUT,
+  // addresses /api/trainer/clients: a Telegram client's document cannot be written by a trainer.
   const clientKeys = [...code.matchAll(/^\s*'(GET|POST|PUT|DELETE) (\/api\/trainer\/clients[^']*)':/gm)].map(m => `${m[1]} ${m[2]}`);
-  assert.deepEqual(clientKeys.sort(), ['GET /api/trainer/clients', 'GET /api/trainer/clients/{id}/data']);
+  assert.deepEqual(clientKeys.sort(), ['GET /api/trainer/clients', 'GET /api/trainer/clients/{id}/data', 'GET /api/trainer/clients/{id}/doc', 'GET /api/trainer/clients/{id}/doc/rev']);
 });
 
 test('the only client document a trainer writes is a managed one, through commitState, after managedTarget', () => {

@@ -397,3 +397,42 @@ test('the reminder goes once, before the booked time, on the booked days, and no
   assert.equal(reminderText('Вася', '18:00'), 'Сегодня к вам придёт Вася в 18:00.');
   assert.equal(reminderText('Вася', ''), 'Сегодня у вас занятие: Вася.');
 });
+
+test('a Telegram client\'s document for the read only app: the real revision, only what was opened, no write at all', async t => {
+  const { app, who } = await world(t, ['coach', 'c1', 'other', 'stranger']);
+  await makeTrainer(who.coach); await makeTrainer(who.other);
+  writeState(app, who.c1.id, { ...CLIENT_STATE, _rev: 7, _wid: 'wid-7', routines: [{ id: 'r1', name: 'Секрет', ex: [] }], notes: 'private', dayPhotos: { '2026-10-20': 'h' } });
+  const l1 = await link(who.coach, who.c1, { history: true, measures: false, stats: false });
+  const doc = await who.coach.get(`/api/trainer/clients/${l1}/doc`);
+  assert.equal(doc.status, 200, doc.text);
+  assert.equal(doc.body.rev, 7, 'the real revision of the client document');
+  assert.equal(doc.body.name, 'Вася');
+  assert.deepEqual(doc.body.grants, { history: true, measures: false, stats: false });
+  // The same whitelist as the trimmed data, with the closed parts empty rather than missing.
+  assert.equal(doc.body.state.workouts.length, 1);
+  assert.deepEqual(doc.body.state.bodyweight, []); assert.deepEqual(doc.body.state.measurements, []);
+  assert.deepEqual(doc.body.state.routines, [], 'routines are never given');
+  const text = JSON.stringify(doc.body);
+  for (const secret of ['Секрет', 'private', 'dayPhotos']) assert.ok(!text.includes(secret), secret);
+  // The poll answers with the same revision; a write of the client document by the trainer does not exist.
+  const rev = await who.coach.get(`/api/trainer/clients/${l1}/doc/rev`);
+  assert.equal(rev.body.rev, 7); assert.equal(rev.body.wid, 'wid-7');
+  for (const method of ['put', 'post', 'del']) {
+    const r = await (method === 'del' ? who.coach.del(`/api/trainer/clients/${l1}/doc`) : who.coach[method](`/api/trainer/clients/${l1}/doc`, { state: { workouts: [] } }));
+    assert.equal(r.status, 404, method);
+  }
+  assert.equal(JSON.parse(fs.readFileSync(path.join(app.dir, `state-${who.c1.id}.json`), 'utf8'))._rev, 7, 'nothing was written');
+  // Not another trainer's, not a stranger's, not the client's own, not a managed client's, not after the link ends.
+  for (const c of [who.other, who.stranger]) {
+    assert.ok([403, 404].includes((await c.get(`/api/trainer/clients/${l1}/doc`)).status));
+    assert.ok([403, 404].includes((await c.get(`/api/trainer/clients/${l1}/doc/rev`)).status));
+  }
+  assert.equal((await who.other.get(`/api/trainer/clients/${l1}/doc`)).body.code, 'client-gone');
+  assert.ok([403, 404].includes((await who.c1.get(`/api/trainer/clients/${l1}/doc`)).status));
+  assert.equal((await app.call(`/api/trainer/clients/${l1}/doc`)).status, 401);
+  const made = await who.coach.post('/api/trainer/managed', { name: 'Мама', ageConfirmed: true });
+  assert.equal((await who.coach.get(`/api/trainer/clients/${made.body.linkId}/doc`)).status, 404, 'a managed client has its own routes');
+  assert.equal((await who.c1.del('/api/trainer/links/' + l1)).status, 200);
+  assert.equal((await who.coach.get(`/api/trainer/clients/${l1}/doc`)).body.code, 'client-gone');
+  assert.equal((await who.coach.get(`/api/trainer/clients/${l1}/doc/rev`)).status, 404);
+});

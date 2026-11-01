@@ -3748,6 +3748,71 @@ paths:
         '403':
           description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
 
+  /api/trainer/clients/{id}/doc:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a client who signed in with Telegram.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getTrainerClientDocument
+      summary: A Telegram client's document, as the app reads it, read only
+      description: |
+        What `GET /api/data` answers for the client, built from what the client opened (the same whitelist as
+        `/api/trainer/clients/{id}/data`) with everything else empty, for the ordinary app opened read only in the
+        client's name. There is no write for this document. `rev` is the real revision. Only the trainer of an
+        active link; anything else answers `404 client-gone`.
+      responses:
+        '200':
+          description: The document, its revision, and the grants.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: { type: object }
+                  rev: { type: integer }
+                  name: { type: string }
+                  grants:
+                    type: object
+                    properties:
+                      history: { type: boolean }
+                      measures: { type: boolean }
+                      stats: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s active client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/clients/{id}/doc/rev:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a client who signed in with Telegram.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getTrainerClientRevision
+      summary: The real revision of a Telegram client's document
+      description: Just the revision, as `GET /api/data/rev` for the client itself; for the app's poll in read only mode.
+      responses:
+        '200':
+          description: The revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rev: { type: integer }
+                  wid: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s active client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/trainer/clients/{id}/data:
     parameters:
       - name: id

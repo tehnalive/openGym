@@ -2428,6 +2428,19 @@ function clientAvatar(client, link) {
   const url = link.managed || !client.telegramId ? '' : telegramPhotoUrl(client.telegramPhotoUrl);
   return url ? { avatarUrl: url } : {};
 }
+// The Telegram client behind `req.trainerId`, for the trainer of its active link only. Another trainer's link, a
+// client's own, an ended one and an unknown id all read the same: not there.
+function telegramClientTarget(req, res, user) {
+  if (!isTrainer(user)) { trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках'); return null; }
+  const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id && !l.managed) : null;
+  const client = link && db.users.find(u => u.id === link.clientUid);
+  if (!link || !client || client.disabled) {
+    audit(req, 'trainer.denied', { ok: false, user, msg: 'no-link' });
+    trainerFail(res, 404, 'client-gone', 'Подопечный недоступен: доступ закрыт или не открыт');
+    return null;
+  }
+  return { link, client };
+}
 // The write behind PUT /api/data, for the document `body.state` of `user` (body: state, baseRev, baseWid, stamped).
 // Returns { status, body } for the caller to send. The trainer's writes to a managed client (TG14) go through
 // here too, so a client document is only ever changed by one set of revision, stamp and conflict rules.
@@ -2748,6 +2761,35 @@ const routes = {
         ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}) });
     }
     json(res, 200, { clients, limit: TRAINER_CLIENT_LIMIT });
+  },
+  // The same client, as the app's own document: what GET /api/data answers, built from what the client opened (the
+  // whitelist of trimForTrainer) with the rest empty, so the ordinary app can show it read only (frontend
+  // lib/managed-mode.js, kind readonly). Nothing here writes: there is no PUT for a Telegram client's document.
+  // The revision is the real one, so the app's poll of /doc/rev works.
+  'GET /api/trainer/clients/{id}/doc': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = telegramClientTarget(req, res, user);
+    if (!t) return;
+    const S = readStateStrict(t.client.id);
+    if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Данные подопечного сейчас не читаются, попробуйте позже');
+    const now = Date.now();
+    if (!(trainerReadNoted.get(t.link.id) > now - 600000)) { trainerReadNoted.set(t.link.id, now); audit(req, 'trainer.read', { user, target: t.client }); }
+    const open = trimForTrainer(S || {}, t.link.grants);
+    const state = { workouts: [], routines: [], bodyweight: [], measurements: [], customEx: [], ...open };
+    json(res, 200, { state, rev: S?._rev || 0, name: displayName(t.client), grants: t.link.grants });
+  },
+  'GET /api/trainer/clients/{id}/doc/rev': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const t = telegramClientTarget(req, res, user);
+    if (!t) return;
+    const doc = readStateCached(t.client.id);
+    json(res, 200, { rev: doc?._rev || 0, ...(doc?._wid ? { wid: doc._wid } : {}) });
   },
   'GET /api/trainer/clients/{id}/data': async (req, res) => {
     const user = trainerCaller(req, res);
@@ -3800,6 +3842,8 @@ const server = http.createServer(async (req, res) => {
   if (tm && req.method === 'DELETE') { key = 'DELETE /api/trainer/' + tm[1] + '/{id}'; req.trainerId = tm[2]; }
   const ts = /^\/api\/trainer\/links\/([^/]+)\/schedule$/.exec(url.pathname);
   if (ts) { key = req.method + ' /api/trainer/links/{id}/schedule'; req.trainerId = ts[1]; }
+  const td = /^\/api\/trainer\/clients\/([^/]+)\/(doc|doc\/rev)$/.exec(url.pathname);
+  if (td) { key = req.method + ' /api/trainer/clients/{id}/' + td[2]; req.trainerId = td[1]; }
   const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);
   if (tc) { key = req.method + ' /api/trainer/clients/{id}/data'; req.trainerId = tc[1]; }
   const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export|data|data\/rev))?$/.exec(url.pathname);
