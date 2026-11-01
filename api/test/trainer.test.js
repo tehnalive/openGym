@@ -343,3 +343,57 @@ test('the trainer gets the Telegram picture of a client with an active link, and
   assert.equal(db.users.find(u => u.id === who.c1.id).telegramPhotoUrl, 'https://t.me/i/userpic/320/abc123.jpg');
   assert.ok(!db.users.find(u => u.id === who.c2.id).telegramPhotoUrl);
 });
+
+test('the trainer sets the days a client comes; only for their own active link; the list and /api/me carry it', async t => {
+  const { who } = await world(t, ['coach', 'c1', 'other']);
+  await makeTrainer(who.coach); await makeTrainer(who.other);
+  const l1 = await link(who.coach, who.c1, { history: true, measures: false, stats: false });
+  const made = await who.coach.post('/api/trainer/managed', { name: 'Мама', ageConfirmed: true });
+  const put = (c, id, body) => c.put(`/api/trainer/links/${id}/schedule`, body);
+
+  const ok = await put(who.coach, l1, { days: [5, 1, 3, 3], time: '18:30', remind: true, tz: 'Europe/Moscow' });
+  assert.equal(ok.status, 200, ok.text);
+  assert.deepEqual(ok.body.schedule, { days: [1, 3, 5], time: '18:30', remind: true });
+  const list = (await who.coach.get('/api/trainer/clients')).body.clients;
+  assert.deepEqual(list.find(c => c.linkId === l1).schedule, { days: [1, 3, 5], time: '18:30', remind: true });
+  assert.equal(list.find(c => c.linkId === made.body.linkId).schedule, null);
+  // A managed client's link takes a schedule too; an empty day list switches the reminder off whatever was asked.
+  const m = await put(who.coach, made.body.linkId, { days: [], remind: true });
+  assert.deepEqual(m.body.schedule, { days: [], time: '', remind: false });
+  // Bad input is refused and nothing changes.
+  for (const bad of [{}, { days: 'x' }, { days: [0] }, { days: [8] }, { days: [1.5] }, { days: [1], time: '25:00' }, { days: [1], time: '9:5' }, { days: [1], remind: 'yes' }, { days: [1, 2, 3, 4, 5, 6, 7, 1] }]) {
+    assert.equal((await put(who.coach, l1, bad)).status, 400, JSON.stringify(bad));
+  }
+  assert.deepEqual((await who.coach.get('/api/trainer/clients')).body.clients.find(c => c.linkId === l1).schedule, { days: [1, 3, 5], time: '18:30', remind: true });
+  // Not another trainer's, not the client's own, not an unknown or ended link.
+  assert.equal((await put(who.other, l1, { days: [2] })).status, 404);
+  assert.equal((await put(who.c1, l1, { days: [2] })).status, 403);
+  assert.equal((await put(who.coach, 'nope-nope-1', { days: [2] })).status, 404);
+  assert.equal((await who.c1.del('/api/trainer/links/' + l1)).status, 200);
+  assert.equal((await put(who.coach, l1, { days: [2] })).status, 404);
+  // The app learns from /api/me that this profile is a trainer's.
+  assert.equal((await who.coach.get('/api/me')).body.user.trainer, true);
+  assert.equal((await who.c1.get('/api/me')).body.user.trainer, undefined);
+});
+
+test('the reminder goes once, before the booked time, on the booked days, and not for what has passed', async () => {
+  const { reminderDecision, reminderText } = await import('../trainer.js');
+  const link = (over = {}) => ({ status: 'active', schedule: { days: [1, 3], time: '18:00', remind: true, ...over } });
+  const at = (weekday, hhmm, date = '2026-11-02') => ({ weekday, hhmm, date });
+  assert.equal(reminderDecision(link(), at(1, '16:59')), null, 'an hour before, not earlier');
+  assert.equal(reminderDecision(link(), at(1, '17:00')), 'send');
+  assert.equal(reminderDecision(link(), at(1, '18:20')), 'send');
+  assert.equal(reminderDecision(link(), at(1, '18:31')), 'skip', 'the moment has passed: marked, not sent');
+  assert.equal(reminderDecision(link(), at(2, '17:30')), null, 'Tuesday is not a booked day');
+  assert.equal(reminderDecision(link({ days: [7] }), at(0, '17:30')), 'send', 'Sunday is 0 for the clock and 7 for the plan');
+  assert.equal(reminderDecision({ ...link(), lastRemindDate: '2026-11-02' }, at(1, '17:30')), null, 'once a day');
+  assert.equal(reminderDecision({ ...link(), lastRemindDate: '2026-10-26' }, at(1, '17:30')), 'send', 'a week later it goes again');
+  assert.equal(reminderDecision(link({ remind: false }), at(1, '17:30')), null);
+  assert.equal(reminderDecision({ ...link(), status: 'revoked' }, at(1, '17:30')), null);
+  // No booked time: the morning.
+  assert.equal(reminderDecision(link({ time: '' }), at(1, '07:59')), null);
+  assert.equal(reminderDecision(link({ time: '' }), at(1, '08:00')), 'send');
+  assert.equal(reminderDecision(link({ time: '' }), at(1, '23:00')), 'send');
+  assert.equal(reminderText('Вася', '18:00'), 'Сегодня к вам придёт Вася в 18:00.');
+  assert.equal(reminderText('Вася', ''), 'Сегодня у вас занятие: Вася.');
+});

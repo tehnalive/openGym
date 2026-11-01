@@ -28,7 +28,7 @@ import {
 import { createBackoff, createWindow } from './rate-limit.js';
 import { SHARE_ID_RE, newShareId, checkBundle, authorName, shareLink, shareExpired } from './shares.js';
 import {
-  TRAINER_CLIENT_LIMIT, CONSENT_VERSION, INVITE_DAYS, INVITE_DEFAULT_DAYS, INVITE_MAX_OPEN, GRANT_KEYS, CLIENT_LIMIT_MESSAGE, TOKEN_RE, ID_RE,
+  checkSchedule, reminderDecision, reminderText, TRAINER_CLIENT_LIMIT, CONSENT_VERSION, INVITE_DAYS, INVITE_DEFAULT_DAYS, INVITE_MAX_OPEN, GRANT_KEYS, CLIENT_LIMIT_MESSAGE, TOKEN_RE, ID_RE,
   newToken, newId, hashToken, inviteLink, displayName, isTrainer, activeLinks, clientLink, inviteState, pruneInvites, checkGrants,
   trimForTrainer, summaryOf, LABEL_MAX
 } from './trainer.js';
@@ -728,6 +728,26 @@ function telegramWeeklyTick() {
     }
   }
 }
+
+// The trainer's reminders: "this client comes today", once a day, from the schedule of each link that has it on.
+// The time zone is the trainer's own (set by the app when the schedule is saved); none known, no reminder.
+function trainerRemindersTick() {
+  if (!TELEGRAM_LOGIN) return;
+  for (const link of db.trainerLinks || []) {
+    if (!link.schedule || !link.schedule.remind || link.status !== 'active') continue;
+    const trainer = db.users.find(u => u.id === link.coachUid);
+    if (!trainer || trainer.disabled || !trainer.telegramId || !isTrainer(trainer) || !trainer.trainer.tz) continue;
+    const now = userNow(trainer.trainer.tz);
+    if (!now) continue;
+    const what = reminderDecision(link, now);
+    if (!what) continue;
+    const client = db.users.find(u => u.id === link.clientUid);
+    link.lastRemindDate = now.date;
+    saveDb();
+    if (what === 'send' && client && !client.disabled) void sendTelegramNotification(trainer.telegramId, reminderText(displayName(client), link.schedule.time));
+  }
+}
+setInterval(trainerRemindersTick, Math.max(1000, +(process.env.TELEGRAM_WEEKLY_TICK_MS || 60000) || 60000)).unref();
 
 const TELEGRAM_WEEKLY_TICK_MS = Math.max(1000, +(process.env.TELEGRAM_WEEKLY_TICK_MS || 60000) || 60000);
 setInterval(telegramWeeklyTick, TELEGRAM_WEEKLY_TICK_MS).unref();
@@ -1437,7 +1457,9 @@ function loginTarget(body) {
 const acctKey = u => 'acct:' + u.id;
 const passkeyCount = u => db.creds.filter(c => c.userId === u.id).length;
 const publicUser = u => ({ id: u.id, name: u.name, admin: isAdmin(u), ...(isOwner(u) ? { owner: true } : {}),
-  ...(u.telegramId && telegramPhotoUrl(u.telegramPhotoUrl) ? { avatarUrl: telegramPhotoUrl(u.telegramPhotoUrl) } : {}) });
+  ...(u.telegramId && telegramPhotoUrl(u.telegramPhotoUrl) ? { avatarUrl: telegramPhotoUrl(u.telegramPhotoUrl) } : {}),
+  // So the app can show the trainer's cabinet where the exercise tab is (frontend components/TabBar.jsx).
+  ...(u.trainer && u.trainer.enabled === true ? { trainer: true } : {}) });
 const POLICY_ERRORS = {
   'too-short': `the password needs at least ${MIN_LENGTH} characters`,
   'too-long': `the password can have at most ${MAX_LENGTH} characters`,
@@ -2721,7 +2743,7 @@ const routes = {
       const client = db.users.find(u => u.id === link.clientUid);
       if (!client || client.disabled) continue;
       const S = readStateStrict(client.id);
-      clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants, ...clientAvatar(client, link),
+      clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants, ...clientAvatar(client, link), schedule: link.schedule || null,
         ...(link.managed ? { managed: true, note: link.note || '' } : {}),
         ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}) });
     }
@@ -2879,6 +2901,25 @@ const routes = {
     trainerReadNoted.delete(t.link.id);
     audit(req, 'trainer.managed.delete', { user, target: t.client });
     json(res, 200, { ok: true });
+  },
+  // Which days this client comes, at what time, and whether to remind the trainer that morning. The trainer's own.
+  'PUT /api/trainer/links/{id}/schedule': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
+    if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    const body = await readBody(req);
+    const made = checkSchedule(body);
+    if (made.error) return trainerFail(res, 400, made.error, made.text);
+    if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    link.schedule = made.schedule;
+    // A new plan is a new day: a reminder that already went today for the old one does not hold the new one back.
+    delete link.lastRemindDate;
+    if (typeof body.tz === 'string' && body.tz.length <= 64 && userNow(body.tz)) user.trainer = { ...user.trainer, tz: body.tz };
+    saveDb();
+    audit(req, 'trainer.schedule', { user, target: db.users.find(u => u.id === link.clientUid) });
+    json(res, 200, { schedule: link.schedule });
   },
   'DELETE /api/trainer/links/{id}': async (req, res) => {
     const user = trainerCaller(req, res);
@@ -3757,6 +3798,8 @@ const server = http.createServer(async (req, res) => {
   if (sm) { key = req.method + ' /api/shares/{id}'; req.shareId = sm[1]; }
   const tm = /^\/api\/trainer\/(invites|links)\/([^/]+)$/.exec(url.pathname);
   if (tm && req.method === 'DELETE') { key = 'DELETE /api/trainer/' + tm[1] + '/{id}'; req.trainerId = tm[2]; }
+  const ts = /^\/api\/trainer\/links\/([^/]+)\/schedule$/.exec(url.pathname);
+  if (ts) { key = req.method + ' /api/trainer/links/{id}/schedule'; req.trainerId = ts[1]; }
   const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);
   if (tc) { key = req.method + ' /api/trainer/clients/{id}/data'; req.trainerId = tc[1]; }
   const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export|data|data\/rev))?$/.exec(url.pathname);

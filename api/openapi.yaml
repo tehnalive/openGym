@@ -4054,6 +4054,53 @@ paths:
           description: 'Not the caller''s managed client (`client-gone`).'
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/trainer/links/{id}/schedule:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    put:
+      tags: [data]
+      operationId: setTrainerSchedule
+      summary: Set the days a client comes
+      description: |
+        The trainer's own plan for one client: the ISO weekdays (1 = Monday .. 7 = Sunday), an optional time of
+        day, and whether the bot reminds the trainer that morning. `tz` is the trainer's time zone, kept for the
+        reminders. Only the trainer of an active link; anything else answers `404 link-gone`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days: { type: array, items: { type: integer, minimum: 1, maximum: 7 } }
+                time: { type: string, description: 'HH:MM or empty' }
+                remind: { type: boolean }
+                tz: { type: string }
+      responses:
+        '200':
+          description: The schedule as stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedule:
+                    type: object
+                    properties:
+                      days: { type: array, items: { type: integer } }
+                      time: { type: string }
+                      remind: { type: boolean }
+        '400':
+          description: The days or the time are not valid.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s active link (`link-gone`).'
+
   /api/trainer/links/{id}:
     parameters:
       - name: id
