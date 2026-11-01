@@ -89,6 +89,7 @@ const LABELS = {
   'trainer.invite.fail': 'A trainer invitation was refused',
   'trainer.read': "Trainer opened a client's data",
   'trainer.link.revoke': 'Ended a trainer link',
+  'trainer.schedule': 'Trainer set the days a client comes',
   'trainer.managed.create': 'Added a client without Telegram',
   'trainer.managed.write': "Trainer changed a managed client's diary",
   'trainer.managed.export': "Trainer exported a managed client's diary",
