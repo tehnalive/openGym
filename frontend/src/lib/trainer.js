@@ -57,6 +57,19 @@ export const trainerApi = {
   managedOps: (linkId, ops, baseRev) => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/ops', 'POST', { ops, ...(baseRev == null ? {} : { baseRev }) }),
   managedExport: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/export'),
   deleteManaged: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId), 'DELETE', { confirm: true }),
+  // Templates and copying routines (section 17 of docs/telegram/TRAINER_MODE.md).
+  templates: () => call('/api/trainer/templates'),
+  template: id => call('/api/trainer/templates/' + encodeURIComponent(id)),
+  createTemplate: body => call('/api/trainer/templates', 'POST', body),
+  changeTemplate: (id, body) => call('/api/trainer/templates/' + encodeURIComponent(id), 'PUT', body),
+  deleteTemplate: id => call('/api/trainer/templates/' + encodeURIComponent(id), 'DELETE'),
+  templateFromClient: (linkId, body) => call('/api/trainer/templates/from-client/' + encodeURIComponent(linkId), 'POST', body),
+  assignTemplate: (id, linkIds) => call('/api/trainer/templates/' + encodeURIComponent(id) + '/assign', 'POST', { linkIds }),
+  managedRoutines: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/routines'),
+  copyRoutines: (linkId, routineIds, toLinkIds) => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/routines/copy', 'POST', { routineIds, toLinkIds }),
+  // A client who signed in with Telegram answers an offer of the trainer.
+  acceptOffer: id => call('/api/trainer/offers/' + encodeURIComponent(id) + '/accept', 'POST', {}),
+  declineOffer: id => call('/api/trainer/offers/' + encodeURIComponent(id) + '/decline', 'POST', {}),
 }
 
 /** The server's Russian text for a refusal, or ours when the network failed first. */

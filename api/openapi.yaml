@@ -4373,6 +4373,41 @@ paths:
           description: '`template-gone`.'
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/trainer/managed/{id}/routines:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: listManagedClientRoutines
+      summary: The routines of a client without Telegram (names)
+      description: |
+        For choosing what to save as a template or copy to other clients. Ids, names and the number of exercises only.
+        A client who signed in with Telegram does not give routines to the trainer: this answers `404 client-gone` for such a link.
+      responses:
+        '200':
+          description: The routines.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  routines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        exerciseCount: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/trainer/managed/{id}/routines/copy:
     parameters:
       - name: id

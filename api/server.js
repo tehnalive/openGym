@@ -3060,6 +3060,19 @@ const routes = {
     audit(req, 'trainer.managed.delete', { user, target: t.client });
     json(res, 200, { ok: true });
   },
+  // The routines of a client without Telegram, for choosing which to save as a template or copy (names only; the content is
+  // read by the server when the choice is made). A Telegram client's routines are not given to the trainer.
+  'GET /api/trainer/managed/{id}/routines': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_READS);
+    if (!user) return;
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const S = readStateStrict(t.client.id);
+    if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
+    const routines = (Array.isArray(S?.routines) ? S.routines : []).filter(r => r && typeof r === 'object' && typeof r.id === 'string')
+      .map(r => ({ id: r.id, name: String(r.name || '').slice(0, 80), exerciseCount: Array.isArray(r.ex) ? r.ex.length : 0 }));
+    json(res, 200, { routines });
+  },
   // Templates (TG14, section 17). Only the trainer's own; the content of a template never appears in the audit log.
   'GET /api/trainer/templates': async (req, res) => {
     const user = templateCaller(req, res, TRAINER_READS);
@@ -4073,7 +4086,7 @@ const server = http.createServer(async (req, res) => {
   if (td) { key = req.method + ' /api/trainer/clients/{id}/' + td[2]; req.trainerId = td[1]; }
   const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);
   if (tc) { key = req.method + ' /api/trainer/clients/{id}/data'; req.trainerId = tc[1]; }
-  const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export|data|data\/rev|routines\/copy))?$/.exec(url.pathname);
+  const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export|data|data\/rev|routines|routines\/copy))?$/.exec(url.pathname);
   if (tg) { key = req.method + ' /api/trainer/managed/{id}' + (tg[2] ? '/' + tg[2] : ''); req.trainerId = tg[1]; }
   // Templates and offers (TG14, section 17): the id in the path is a template, a link or an offer.
   const tf = /^\/api\/trainer\/templates\/from-client\/([^/]+)$/.exec(url.pathname);

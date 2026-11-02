@@ -50,6 +50,7 @@ import MobileOnboarding from './views/MobileOnboarding.jsx'
 import PermissionSteps from './views/PermissionSteps.jsx'
 import SharedPlanGate from './components/SharedPlan.jsx'
 import TrainerConsentGate from './components/TrainerConsent.jsx'
+import TrainerOfferGate from './components/TrainerOffer.jsx'
 import FirstRunOnboarding, { needsFirstRunOnboarding as needsFirstRun } from './views/FirstRunOnboarding.jsx'
 import Home from './views/Home.jsx'
 import Plan from './views/Plan.jsx'
@@ -86,6 +87,7 @@ const Muscles = lazyView(() => import('./views/Muscles.jsx'))
 const TrainerHome = lazyView(() => import('./views/TrainerHome.jsx'))
 const TrainerClient = lazyView(() => import('./views/TrainerClient.jsx'))
 const TrainerManaged = lazyView(() => import('./views/TrainerManaged.jsx'))
+const TrainerTemplates = lazyView(() => import('./views/TrainerTemplates.jsx'))
 const ReadonlyHome = lazyView(() => import('./views/ReadonlyDiary.jsx').then(m => ({ default: m.ReadonlyHome })))
 const ReadonlyHistory = lazyView(() => import('./views/ReadonlyDiary.jsx').then(m => ({ default: m.ReadonlyHistory })))
 const ReadonlyMeasures = lazyView(() => import('./views/ReadonlyDiary.jsx').then(m => ({ default: m.ReadonlyMeasures })))
@@ -300,6 +302,8 @@ function Shell() {
   const noTabs = inWorkout || loc.pathname === '/coach' || needsMobileOnboarding || permSteps || needsFirstRunOnboarding
 
   const authed = user || isGuest
+  // Signed in through Telegram: the only profiles that can have a trainer (TRAINER_MODE.md section 17).
+  const telegramReady = useStore(s => s.telegram?.status === 'ready')
   // The boot screen in index.html covers the start; it goes once there is something to show.
   useEffect(() => { if (ready || authed) hideBoot() }, [ready, authed])
   if (!ready && !authed) return (
@@ -351,6 +355,7 @@ function Shell() {
       <Route path="/progress-photos" element={<Navigate to="/stats" replace />} />
       <Route path="/measurements" element={<Measurements />} />
       <Route path="/trainer" element={<TrainerHome />} />
+      <Route path="/trainer/templates" element={<TrainerTemplates />} />
       <Route path="/trainer/m/:linkId" element={<TrainerManaged />} />
       <Route path="/trainer/:linkId" element={<TrainerClient />} />
       <Route path="/settings" element={<SettingsRoute />} />
@@ -387,6 +392,8 @@ function Shell() {
       {!managed && <SharedPlanGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />}
       {/* A trainer's invitation (startapp=t_<token>): the consent screen opens at the same moment. */}
       {!managed && <TrainerConsentGate blocked={!authed || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />}
+      {/* A program the trainer handed to this client (TRAINER_MODE.md section 17): offered once the app is past sign-in. */}
+      {!managed && <TrainerOfferGate blocked={!authed || !telegramReady || !!needsMobileOnboarding || !!permSteps || needsFirstRunOnboarding} />}
       {!noTabs && <TabBar onStart={startFlow} />}
       <RestTimer />
       <Modals />

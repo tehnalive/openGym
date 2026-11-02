@@ -120,6 +120,9 @@ export default function TrainerHome() {
       : <div className="empty"><div className="ico"><Icon name="personCircle" /></div>Подопечных пока нет. Пригласите первого по ссылке.</div>)}
 
     <div style={{ height: 12 }} />
+    {/* Programs to hand to clients: saved routines, copied into a client's diary or offered to one with Telegram (section 17). */}
+    {me && <Button icon="clipboard" onClick={() => nav('/trainer/templates')}>Шаблоны</Button>}
+    <div style={{ height: 12 }} />
     {full
       ? <div className="dim small" style={{ lineHeight: 1.4, marginBottom: 12 }}>Сейчас доступно {me.trainer.limit} подопечных, позже появится возможность добавить больше.</div>
       : adding === 'managed'

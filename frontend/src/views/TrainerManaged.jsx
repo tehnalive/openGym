@@ -7,6 +7,7 @@ import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText, clientView } from '../lib/trainer.js'
 import { exportFile, saveFile } from '../lib/trainer-managed.js'
 import { openManagedDiary } from '../components/ManagedBar.jsx'
+import ManagedRoutines from '../components/ManagedRoutines.jsx'
 import { copyLink } from '../lib/plan-link.js'
 import Icon from '../components/Icon.jsx'
 import { confirmSheet } from '../sheets.jsx'
@@ -64,6 +65,9 @@ export default function TrainerManaged() {
         <div className="dim small" style={{ lineHeight: 1.4, marginTop: 4 }}>В дневнике: {counts}</div>
       </div>
       <button className="btn primary" style={{ marginBottom: 8 }} onClick={() => openManagedDiary(res.linkId || linkId, res.name)}>Открыть дневник</button>
+      {/* Its routines: to the templates, or copied to other clients (TRAINER_MODE.md section 17). */}
+      <div style={{ height: 8 }} />
+      <ManagedRoutines linkId={res.linkId || linkId} />
       <div className="dim small" style={{ margin: '14px 0 8px', lineHeight: 1.4 }}>
         У подопечного нет Telegram, поэтому дневник хранится на сервере под вашей ответственностью. Вы можете скачать его в любой момент и удалить целиком. Когда у подопечного появится свой аккаунт, он загрузит этот файл в приложении: Настройки → Импорт копии.
       </div>

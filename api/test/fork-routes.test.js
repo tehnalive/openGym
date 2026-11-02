@@ -44,7 +44,7 @@ for (const route of ['GET /api/trainer/me', 'PUT /api/trainer/me', 'POST /api/tr
   'GET /api/trainer/clients/{id}/doc', 'GET /api/trainer/clients/{id}/doc/rev',
   'GET /api/trainer/templates', 'POST /api/trainer/templates', 'POST /api/trainer/templates/from-client/{id}', 'GET /api/trainer/templates/{id}',
   'PUT /api/trainer/templates/{id}', 'DELETE /api/trainer/templates/{id}', 'POST /api/trainer/templates/{id}/assign',
-  'POST /api/trainer/managed/{id}/routines/copy', 'POST /api/trainer/offers/{id}/accept', 'POST /api/trainer/offers/{id}/decline']) {
+  'GET /api/trainer/managed/{id}/routines', 'POST /api/trainer/managed/{id}/routines/copy', 'POST /api/trainer/offers/{id}/accept', 'POST /api/trainer/offers/{id}/decline']) {
   test(`trainer route ${route} exists and is documented`, () => {
     assert.ok(server.includes(`'${route}'`), `${route} missing from server.js`);
     const [method, path] = route.split(' ');
@@ -110,6 +110,8 @@ test('templates and offers (section 17): a client document is written only for a
   // The routes that read a client's routines resolve a managed client first (a Telegram client's routines are never read).
   const rStart = server.indexOf("'POST /api/trainer/templates/from-client/{id}'");
   assert.ok(/managedClientOf\(user, req\.trainerId\)/.test(server.slice(rStart, rStart + 400)), 'from-client does not resolve a managed client');
+  const lStart = server.indexOf("'GET /api/trainer/managed/{id}/routines'");
+  assert.ok(/managedTarget\(req, res, user\)/.test(server.slice(lStart, lStart + 500)), 'the routine list does not call managedTarget');
   const cStart = server.indexOf("'POST /api/trainer/managed/{id}/routines/copy'");
   assert.ok(/managedTarget\(req, res, user\)/.test(server.slice(cStart, cStart + 500)), 'copy does not call managedTarget');
   // Nothing that is not a trainer's route writes a template file by hand.

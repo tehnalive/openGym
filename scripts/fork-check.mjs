@@ -57,6 +57,13 @@ const PRESENCE = [
   ['Managed diary: no exercise library tab', 'frontend/src/components/TabBar.jsx', 'has', 'isManagedMode()'],
   ['Read only diary: client document route', 'api/openapi.yaml', 'has', '/api/trainer/clients/{id}/doc:'],
   ['Read only diary: routes in App', 'frontend/src/App.jsx', 'has', 'readonlyRoutes'],
+  ['Trainer templates: assign route', 'api/server.js', 'has', "'POST /api/trainer/templates/{id}/assign'"],
+  ['Trainer templates: offer routes', 'api/server.js', 'has', "'POST /api/trainer/offers/{id}/accept'"],
+  ['Trainer templates: API image ships trainer-templates.js', 'api/Dockerfile', 'has', 'trainer-templates.js'],
+  ['Trainer templates: routes in openapi.yaml', 'api/openapi.yaml', 'has', '/api/trainer/templates/{id}/assign:'],
+  ['Trainer templates: audit labels', 'frontend/src/lib/audit.js', 'has', "'trainer.template.assign'"],
+  ['Trainer templates: offer gate in App', 'frontend/src/App.jsx', 'has', '<TrainerOfferGate'],
+  ['Trainer templates: screen route in App', 'frontend/src/App.jsx', 'has', '/trainer/templates'],
   ['Trainer mode: settings card', 'frontend/src/views/Settings.jsx', 'has', '<TrainerSettings />'],
   ['Removed: check-in screen', 'frontend/src/App.jsx', 'not', 'views/CheckIn.jsx'],
   ['Removed: progress photos screen', 'frontend/src/App.jsx', 'not', 'views/ProgressPhotos.jsx'],
@@ -69,10 +76,11 @@ const FRONTEND_TESTS = [
   'src/store/useStore.telegram.test.jsx',
   'src/lib/trainer.test.js', 'src/components/TrainerConsent.test.jsx', 'src/views/Trainer.test.jsx', 'src/lib/plan-link.test.js',
   'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx', 'src/lib/managed-mode.test.js', 'src/components/ManagedBar.test.jsx', 'src/views/ReadonlyDiary.test.jsx', 'src/components/CoachMark.test.jsx',
+  'src/lib/trainer-templates.test.js', 'src/components/TrainerOffer.test.jsx', 'src/views/TrainerTemplates.test.jsx',
 ]
 const API_TESTS = [
   'test/fork-routes.test.js', 'test/server-telegram-only.test.js', 'test/telegram-login.test.js', 'test/openapi-routes.test.js',
-  'test/trainer.test.js', 'test/trainer-managed.test.js',
+  'test/trainer.test.js', 'test/trainer-managed.test.js', 'test/trainer-templates.test.js',
 ]
 
 const failures = []

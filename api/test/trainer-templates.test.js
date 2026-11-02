@@ -444,6 +444,9 @@ test('from a client: routines of a client without Telegram become a template; a 
     { ...routine({ id: 'm1', name: 'Мамина', ex: [squat(), { id: 'c_x', sets: 1 }] }), by: 'zz' },
     { id: 'm2', name: 'Вторая', ex: [{ id: 'bench', sets: 3 }] },
   ], [custom({ id: 'c_x', n: 'Её' }), custom({ id: 'c_unused', n: 'Лишнее' })]);
+  const names = await who.coach.get(`/api/trainer/managed/${link}/routines`);
+  assert.deepEqual(names.body.routines, [{ id: 'm1', name: 'Мамина', exerciseCount: 2 }, { id: 'm2', name: 'Вторая', exerciseCount: 1 }]);
+  assert.equal((await who.other.get(`/api/trainer/managed/${link}/routines`)).status, 404);
   const made = await who.coach.post(`/api/trainer/templates/from-client/${link}`, { name: 'От мамы', routineIds: ['m2', 'm1'] });
   assert.equal(made.status, 200, made.text);
   const tpl = made.body.template;
@@ -461,6 +464,8 @@ test('from a client: routines of a client without Telegram become a template; a 
 
   const tg = await telegramClient(who.coach, who.c1);
   await who.c1.put('/api/data', { state: { unit: 'kg', routines: [{ id: 'secret1', name: 'Секретная', ex: [] }], workouts: [] } });
+  const peek = await who.coach.get(`/api/trainer/managed/${tg}/routines`);
+  assert.equal(peek.status, 404); assert.equal(peek.body.code, 'client-gone'); assert.ok(!peek.text.includes('Секретная'));
   const refused = await who.coach.post(`/api/trainer/templates/from-client/${tg}`, { name: 'x', routineIds: ['secret1'] });
   assert.equal(refused.status, 403); assert.equal(refused.body.code, 'client-private');
   assert.ok(!refused.text.includes('Секретная'));
