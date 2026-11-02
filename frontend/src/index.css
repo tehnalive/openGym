@@ -2390,8 +2390,10 @@ html[data-kbmode="top"] .sheet:has(.picker-search),html[data-kbmode="top"] .shee
 
 /* --- «written by the trainer» mark on a workout (TG14, section 16) --- */
 .coach-mark{
-  display:inline-flex;align-items:center;gap:4px;vertical-align:middle;
+  display:inline-flex;align-items:center;gap:4px;vertical-align:middle;white-space:nowrap;flex-shrink:0;
   background:var(--surface-3);color:var(--label-2);
   border-radius:6px;padding:2px 7px;font-size:12px;font-weight:500;line-height:1.3;
 }
 .coach-mark .icn{font-size:13px}
+/* a long badge (German) never pushes the name out: the name gives way, with an ellipsis */
+.grow:has(+ .coach-mark) .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

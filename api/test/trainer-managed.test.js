@@ -337,12 +337,13 @@ test('the trainer reads and pushes a managed diary as the app syncs it: revision
   assert.equal(stored.workouts[0].id, 'w1');
   assert.ok(!('dayPhotos' in stored) && !('coach' in stored), 'personal keys never stored');
   assert.ok(!('photo' in stored.customEx[0]) && !('media' in stored.customEx[0]), 'no media references stored');
-  assert.equal((await who.coach.get(dataPath(linkId) + '/rev')).body.rev, rev0 + 1);
+  // The server marked the new workout, so it is one revision further than the answer said: the app reads it again.
+  assert.equal((await who.coach.get(dataPath(linkId) + '/rev')).body.rev, rev0 + 2);
 
   // A stale baseRev is a conflict that carries the current document.
   const stale = await who.coach.put(dataPath(linkId), { state: doc, baseRev: rev0 });
   assert.equal(stale.status, 409);
-  assert.equal(stale.body.rev, rev0 + 1);
+  assert.equal(stale.body.rev, rev0 + 2);
   assert.equal(stale.body.state.workouts[0].id, 'w1');
   // The checks of PUT /api/data apply: an empty document and a document that is not one are refused.
   assert.equal((await who.coach.put(dataPath(linkId), { state: {} })).status, 400);
@@ -420,7 +421,7 @@ test('applyCoachMarks: the trainer\'s new and changed workouts are marked, a per
   assert.deepEqual(imp.workouts.map(w => [w.via, w.by]), [['coach', undefined], [undefined, undefined]]);
   // A stamping writer gets the new mark stamped like its own edit.
   const st = applyCoachMarks(stored, { workouts: [{ id: 'b', d: '2026-01-02', name: 'B2', _ts: 50, _f: { name: 50 } }] }, { coachUid: 'T', stamped: true, now: 10 });
-  assert.deepEqual(st.workouts[0]._f, { name: 50, via: 50 });
+  assert.deepEqual(st.workouts[0]._f, { name: 50, via: 50, by: 50 });
   assert.deepEqual(applyCoachMarks({}, { unit: 'kg' }, { coachUid: 'T' }), { unit: 'kg' });
 });
 
@@ -491,4 +492,99 @@ test('the export keeps the mark (and not the trainer\'s id), so an imported copy
   assert.ok(!ex.text.includes(who.coach.id), 'no profile ids in the export');
   assert.equal(managedExport('x', { workouts: [{ id: 1, via: 'coach', by: 'u' }] }).data.workouts[0].by, undefined);
   assert.equal(managedView({ workouts: [{ id: 1, via: 'coach' }] }).workouts[0].via, 'coach');
+});
+
+// ---- the mark: review fixes ----
+const seed = (app, uid, patch) => {
+  const f = path.join(app.dir, `state-${uid}.json`);
+  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), ...patch }));
+};
+const managedWorld = async t => {
+  const { app, who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const { linkId } = (await add(who.coach)).body;
+  return { app, who, linkId, uid: app.db().users.find(u => u.managedBy === who.coach.id).id };
+};
+
+test('the mark moves the revision one further than the push answered, so the app reads the document again; nothing moves when there is no mark to set', async t => {
+  const { app, who, linkId, uid } = await managedWorld(t);
+  const first = await who.coach.get(dataPath(linkId));
+  const put = await who.coach.put(dataPath(linkId), { state: { ...first.body.state, workouts: [workout({ _ts: 5 })] }, baseRev: first.body.rev, stamped: true });
+  assert.equal(put.status, 200, put.text);
+  const rev = (await who.coach.get(dataPath(linkId) + '/rev')).body.rev;
+  assert.equal(rev, put.body.rev + 1, 'the app sees a different revision and pulls');
+  const read = await who.coach.get(dataPath(linkId));
+  assert.equal(read.body.state.workouts[0].via, 'coach');
+  // The pulled document pushed back: nothing to set, the answer is the revision stored.
+  const again = await who.coach.put(dataPath(linkId), { state: read.body.state, baseRev: read.body.rev, baseWid: read.body.state._wid, stamped: true });
+  assert.equal((await who.coach.get(dataPath(linkId) + '/rev')).body.rev, again.body.rev);
+  assert.equal(stateOf(app, uid).workouts[0].via, 'coach');
+});
+
+test('a conflict on the document PUT carries no profile id and no personal keys', async t => {
+  const { app, who, linkId, uid } = await managedWorld(t);
+  const first = await who.coach.get(dataPath(linkId));
+  await who.coach.put(dataPath(linkId), { state: { ...first.body.state, workouts: [workout()] }, baseRev: first.body.rev });
+  seed(app, uid, { dayPhotos: { [TODAY]: 'abc' }, coach: { memory: 'x' } });
+  const stale = await who.coach.put(dataPath(linkId), { state: first.body.state, baseRev: first.body.rev });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.state.workouts[0].via, 'coach');
+  assert.ok(!stale.text.includes(who.coach.id) && !('dayPhotos' in stale.body.state) && !('coach' in stale.body.state), stale.text);
+});
+
+test('ops on a workout the diary already held, unmarked: a changed one is marked, an unchanged one is not', async t => {
+  const { app, who, linkId, uid } = await managedWorld(t);
+  const own = { id: 'w1', d: TODAY, start: 1, end: 2, name: 'Своя', entries: [{ id: 'squat', sets: [{ w: 60, r: 8, done: true }] }], _ts: 3 };
+  seed(app, uid, { workouts: [own] });
+  assert.equal((await ops(who.coach, linkId, [{ op: 'workout.save', workout: { ...own } }])).status, 200);
+  assert.equal(stateOf(app, uid).workouts[0].via, undefined, 'saved as it was: still the person\'s');
+  assert.equal((await ops(who.coach, linkId, [{ op: 'workout.save', workout: { ...own, name: 'Поправил тренер' } }])).status, 200);
+  const w = stateOf(app, uid).workouts[0];
+  assert.equal(w.via, 'coach'); assert.equal(w.by, who.coach.id);
+});
+
+for (const stamped of [false, true]) {
+  test(`the trainer's edit of an unmarked workout, pushed ${stamped ? 'stamped' : 'unstamped'}: marked, stamped per field, not undone`, async t => {
+    const { app, who, linkId, uid } = await managedWorld(t);
+    const own = { id: 'w1', d: TODAY, start: 1, end: 2, name: 'Своя', entries: [{ id: 'squat', sets: [{ w: 60, r: 8, done: true }] }], _ts: 3, _f: { name: 3 } };
+    seed(app, uid, { workouts: [own] });
+    const cur = await who.coach.get(dataPath(linkId));
+    const edited = { ...cur.body.state.workouts[0], name: 'Поправил тренер', ...(stamped ? { _ts: Date.now(), _f: { name: Date.now() } } : {}) };
+    const put = await who.coach.put(dataPath(linkId), { state: { ...cur.body.state, workouts: [edited] }, baseRev: cur.body.rev, baseWid: cur.body.state._wid, stamped });
+    assert.equal(put.status, 200, put.text);
+    const w = stateOf(app, uid).workouts[0];
+    assert.equal(w.name, 'Поправил тренер'); assert.equal(w.via, 'coach'); assert.equal(w.by, who.coach.id);
+    assert.ok(w._f.via > 0 && w._f.by > 0, JSON.stringify(w._f));
+    assert.equal(w._f.via, w._f.by);
+  });
+}
+
+test('a workout without an id follows the same rule, by its day and start', async t => {
+  const { app, who, linkId, uid } = await managedWorld(t);
+  const noId = { d: TODAY, start: 77, end: 99, name: 'Старая', entries: [{ id: 'squat', sets: [{ w: 1, r: 1, done: true }] }] };
+  seed(app, uid, { workouts: [noId] });
+  const cur = await who.coach.get(dataPath(linkId));
+  const forged = { ...cur.body.state.workouts[0], via: 'coach' };
+  // Nobody can add the mark to the stored, unmarked one, not even the trainer, who did not change it.
+  await who.coach.put(dataPath(linkId), { state: { ...cur.body.state, workouts: [forged] }, baseRev: cur.body.rev });
+  assert.equal(stateOf(app, uid).workouts[0].via, undefined);
+  // A changed one, or a new one, is the trainer's.
+  const cur2 = await who.coach.get(dataPath(linkId));
+  const next = [{ ...cur2.body.state.workouts[0], name: 'Новая' }, { d: TODAY, start: 5, name: 'Ещё', entries: [] }];
+  await who.coach.put(dataPath(linkId), { state: { ...cur2.body.state, workouts: next }, baseRev: cur2.body.rev });
+  assert.deepEqual(stateOf(app, uid).workouts.map(w => w.via), ['coach', 'coach']);
+});
+
+test('PUT /api/data: a new workout arriving with the mark keeps `via` only, and a stored unmarked one without an id cannot get it', async t => {
+  const { app, who } = await world(t, ['c1']);
+  const c = who.c1;
+  const noId = { d: TODAY, start: 5, name: 'Без номера', entries: [] };
+  assert.equal((await c.put('/api/data', { state: { unit: 'kg', routines: [], workouts: [workout({ id: 'n1', via: 'coach', by: 'x' }), noId] } })).status, 200);
+  let s = stateOf(app, c.id);
+  assert.equal(s.workouts[0].via, 'coach'); assert.ok(!('by' in s.workouts[0]));
+  const get = await c.get('/api/data');
+  const ws = get.body.state.workouts.map(w => (w.id ? w : { ...w, via: 'coach' }));
+  assert.equal((await c.put('/api/data', { state: { ...get.body.state, workouts: ws }, baseRev: get.body.rev })).status, 200);
+  s = stateOf(app, c.id);
+  assert.equal(s.workouts.find(w => !w.id).via, undefined);
 });

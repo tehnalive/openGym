@@ -9,5 +9,5 @@ export const isCoachWorkout = w => !!w && typeof w === 'object' && w.via === 'co
 export default function CoachMark({ w, text }) {
   if (!isCoachWorkout(w)) return null
   const label = text || t('Written by the trainer')
-  return <span className="coach-mark" data-testid="coach-mark" title={label}><Icon name="person" />{label}</span>
+  return <span className="coach-mark" data-testid="coach-mark"><Icon name="person" />{label}</span>
 }
