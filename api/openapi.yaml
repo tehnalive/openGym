@@ -3522,11 +3522,9 @@ paths:
                         description: 'An archived link still stands: the trainer cannot read anything, and no other trainer can take the client until the client ends it.'
                       pause:
                         type: object
-                        description: 'Only while the trainer has the client on pause.'
+                        description: 'Only while the trainer has the client on pause. The trainer''s reason is not shown to the client.'
                         properties:
-                          since: { type: string, format: date-time }
                           until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
-                          reason: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: 'Not a Telegram profile (`code: telegram-required`).'

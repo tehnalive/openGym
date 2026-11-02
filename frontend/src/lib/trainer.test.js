@@ -137,3 +137,37 @@ describe('the trainer week', () => {
     expect(isoWeekday(new Date(2026, 10, 2))).toBe(1)
   })
 })
+
+describe('pause and archive helpers', () => {
+  it('counts the last paused day: a week from today is today plus six', async () => {
+    const { pauseUntil, PAUSE_PRESETS } = await import('./trainer.js')
+    const now = new Date(2026, 10, 3, 18, 0)
+    expect(pauseUntil(7, now)).toBe('2026-11-09')
+    expect(pauseUntil(14, now)).toBe('2026-11-16')
+    expect(pauseUntil(30, now)).toBe('2026-12-02')
+    expect(pauseUntil(null, now)).toBeNull()
+    expect(PAUSE_PRESETS.map(p => p.label)).toEqual(['1 неделя', '2 недели', 'Месяц', 'Без срока'])
+    expect(pauseUntil(1, new Date(2026, 11, 31, 23, 59))).toBe('2026-12-31')
+  })
+  it('words the pause for the row', async () => {
+    const { pauseText, archivedText } = await import('./trainer.js')
+    expect(pauseText(null)).toBe('')
+    expect(pauseText({ until: '2026-11-15' })).toMatch(/^Пауза до 15 нояб\.?$/)
+    expect(pauseText({ until: '2026-11-15', reason: 'Отпуск' })).toMatch(/^Пауза до 15 нояб\.? · Отпуск$/)
+    expect(pauseText({ until: null, reason: 'Травма' })).toBe('Пауза · Травма')
+    expect(pauseText({ until: null })).toBe('Пауза')
+    expect(archivedText('2026-11-03T08:00:00Z')).toMatch(/^В архиве с 3 нояб\.?$/)
+    expect(archivedText(null)).toBe('В архиве')
+  })
+  it('does not expect a client on pause on their days', async () => {
+    const { clientsOn, weekPlan, pausedOnWeekday } = await import('./trainer.js')
+    const clients = [
+      { linkId: 'a', name: 'Вася', schedule: { days: [1], time: '10:00', remind: true }, pause: null },
+      { linkId: 'b', name: 'Петя', schedule: { days: [1], time: '11:00', remind: true }, pause: { until: null } },
+    ]
+    expect(clientsOn(clients, 1).map(x => x.name)).toEqual(['Вася'])
+    expect(weekPlan(clients)[0].clients.map(x => x.name)).toEqual(['Вася'])
+    expect(pausedOnWeekday(clients, 1).map(x => x.name)).toEqual(['Петя'])
+    expect(pausedOnWeekday(clients, 2)).toEqual([])
+  })
+})

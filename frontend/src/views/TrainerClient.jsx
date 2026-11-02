@@ -16,6 +16,7 @@ import LineChart from '../components/LineChart.jsx'
 import Icon from '../components/Icon.jsx'
 import { confirmSheet } from '../sheets.jsx'
 import ProfileAvatar from '../components/ProfileAvatar.jsx'
+import ClientLifecycle from '../components/TrainerLifecycle.jsx'
 
 const nameOf = e => (EXIDX[e.id] ? exerciseNameFor(EXIDX[e.id]) : (e.n || e.id || 'Упражнение'))
 
@@ -103,6 +104,7 @@ function ClientSettings({ res, linkId, onDone }) {
         <span>{x.label}</span><span className={res.grants[x.key] ? '' : 'dim'}>{res.grants[x.key] ? 'открыто' : 'закрыто'}</span></div>)}
       <div className="dim small" style={{ marginTop: 8, lineHeight: 1.4 }}>{res.name} видит этот доступ у себя и может закрыть его сам. Данные остаются у подопечного.</div>
     </div>
+    <ClientLifecycle linkId={linkId} name={res.name} pause={res.pause} onArchived={onDone} />
     <button className="btn danger" onClick={() => confirmSheet({
       title: 'Завершить связь?', message: `Вы перестанете видеть данные: ${res.name}. Подопечный сможет пригласить вас снова.`,
       confirmText: 'Завершить', danger: true,

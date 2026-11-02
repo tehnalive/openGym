@@ -2657,7 +2657,8 @@ const routes = {
           .map(i => ({ id: i.id, label: i.label || '', created: i.created, expires: i.expires }))
       } : { enabled: false, limit: TRAINER_CLIENT_LIMIT },
       asClient: link && coach ? { linkId: link.id, coachName: displayName(coach), grants: link.grants, consentAt: link.consentAt, status: link.status,
-        ...(link.status === 'active' && pauseOf(link, trainerToday(coach)) ? { pause: pauseOf(link, trainerToday(coach)) } : {}) } : null
+        // The reason is the trainer's own note; the client is told only that there is a pause and until when.
+        ...(link.status === 'active' && pauseOf(link, trainerToday(coach)) ? { pause: { until: pauseOf(link, trainerToday(coach)).until } } : {}) } : null
     });
   },
   'PUT /api/trainer/me': async (req, res) => {

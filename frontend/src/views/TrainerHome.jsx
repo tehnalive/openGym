@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
-import { trainerApi, errorText, grantsText, daysSince, ago, scheduleText, clientsOn, weekPlan, isoWeekday } from '../lib/trainer.js'
+import { trainerApi, errorText, grantsText, daysSince, ago, scheduleText, clientsOn, weekPlan, isoWeekday, pauseText, pausedOnWeekday, archivedText } from '../lib/trainer.js'
+import { exportFile, saveFile } from '../lib/trainer-managed.js'
 import { scheduleSheet } from '../components/TrainerSchedule.jsx'
 import { sendLink, copyLink } from '../lib/plan-link.js'
 import { takeManagedNotice } from '../lib/managed-mode.js'
@@ -11,6 +12,7 @@ import { openManagedDiary, openReadonlyDiary } from '../components/ManagedBar.js
 import { Button, Section, Row, Check, TextField, Segmented } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
 import ProfileAvatar from '../components/ProfileAvatar.jsx'
+import { confirmSheet } from '../sheets.jsx'
 
 const toast = m => useUI.getState().toast(m)
 // A Telegram client opens the read-only view; a client without Telegram opens as the ordinary app, in their name.
@@ -26,6 +28,9 @@ export default function TrainerHome() {
   const nav = useNavigate()
   const [me, setMe] = useState(null)
   const [clients, setClients] = useState(null)
+  const [archived, setArchived] = useState([])   // the archive: names only, the trainer has no access to their data
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archiveError, setArchiveError] = useState({})   // by link id: the refusal of "bring back"
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [fresh, setFresh] = useState(null)   // the invitation just made: { link, expires }
@@ -36,7 +41,7 @@ export default function TrainerHome() {
     try {
       const m = await trainerApi.me()
       setMe(m)
-      if (m.trainer.enabled) setClients((await trainerApi.clients()).clients)
+      if (m.trainer.enabled) { const r = await trainerApi.clients(); setClients(r.clients); setArchived(Array.isArray(r.archived) ? r.archived : []) }
     } catch (e) { setError(errorText(e)) }
   }, [])
   useEffect(() => { load() }, [load])
@@ -71,7 +76,30 @@ export default function TrainerHome() {
     catch (e) { toast(errorText(e)) }
   }
   const setSchedule = (linkId, schedule) => setClients(list => list.map(c => (c.linkId === linkId ? { ...c, schedule } : c)))
+  const restore = async c => {
+    setArchiveError(e => ({ ...e, [c.linkId]: '' }))
+    try { await trainerApi.restore(c.linkId); toast('Подопечный вернулся из архива'); await load() }
+    catch (e) { setArchiveError(x => ({ ...x, [c.linkId]: errorText(e) })) }
+  }
+  const exportArchived = async c => {
+    try {
+      const file = exportFile(await trainerApi.managedExport(c.linkId))
+      if (saveFile(file.name, file.text)) toast('Файл сохранён')
+      else toast(await copyLink(file.text) ? 'Файл не сохранился, данные скопированы текстом' : 'Не удалось выгрузить данные')
+    } catch (e) { toast(errorText(e)) }
+  }
+  const removeArchived = c => confirmSheet({
+    title: 'Удалить подопечного?', message: `Дневник «${c.name}» будет стёрт без возврата. Если нужна копия, сначала скачайте данные.`,
+    confirmText: 'Удалить навсегда', danger: true,
+    onConfirm: async () => { try { await trainerApi.deleteManaged(c.linkId); toast('Подопечный удалён'); await load() } catch (e) { toast(errorText(e)) } },
+  })
+  const endArchived = c => confirmSheet({
+    title: 'Завершить связь?', message: `Вы больше не увидите ${c.name} в архиве. Подопечный сможет пригласить вас снова.`,
+    confirmText: 'Завершить', danger: true,
+    onConfirm: async () => { try { await trainerApi.endLink(c.linkId); toast('Связь завершена'); await load() } catch (e) { toast(errorText(e)) } },
+  })
   const today = clients ? clientsOn(clients, isoWeekday()) : []
+  const todayPaused = clients ? pausedOnWeekday(clients, isoWeekday()) : []
   const planned = !!clients && clients.some(c => c.schedule?.days?.length)
   const full = me && clients && clients.length >= me.trainer.limit
   const invites = me?.trainer.invites || []
@@ -92,6 +120,7 @@ export default function TrainerHome() {
             onClick={() => openClient(x.client, nav)} onKeyDown={e => { if (e.key === 'Enter') openClient(x.client, nav) }}>
             <span><strong>{x.time || 'В любое время'}</strong> · {x.name}</span>{x.remind && <Icon name="bell" />}</div>)
           : <div className="dim small" style={{ lineHeight: 1.4 }}>{planned ? 'Сегодня никто не записан.' : 'Отметьте у подопечных, в какие дни они приходят, и здесь появится расписание.'}</div>}
+        {todayPaused.length > 0 && <div className="dim small" style={{ lineHeight: 1.4, marginTop: 6 }}>На паузе: {todayPaused.map(c => c.name).join(', ')}</div>}
       </div>
       {planned && <div className="card" style={{ marginBottom: 12 }} aria-label="Неделя">
         <div className="tt" style={{ marginBottom: 6 }}>Неделя</div>
@@ -102,12 +131,13 @@ export default function TrainerHome() {
     </>}
 
     {clients && (clients.length
-      ? <div className="list">{clients.map(c => <div key={c.linkId} className="item" role="button" tabIndex={0}
+      ? <div className="list">{clients.map(c => <div key={c.linkId} className="item" role="button" tabIndex={0} style={c.pause ? { opacity: 0.6 } : undefined}
         onClick={() => openClient(c, nav)} onKeyDown={e => { if (e.key === 'Enter') openClient(c, nav) }}>
         {/* The client's Telegram picture, else the initial on a grey disc; a client without Telegram has the initial only. */}
         <ProfileAvatar user={{ id: c.linkId, name: c.name, avatarUrl: c.avatarUrl }} size={38} neutral />
         <div className="grow"><div className="tt">{c.name}</div>
           <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div>
+          {c.pause && <div className="ss">{pauseText(c.pause)}</div>}
           {scheduleText(c.schedule) && <div className="ss">{scheduleText(c.schedule)}</div>}</div>
         <button className="iconbtn" aria-label={'Расписание: ' + c.name} title="Расписание"
           onClick={e => { e.stopPropagation(); scheduleSheet({ linkId: c.linkId, name: c.name, schedule: c.schedule, onSaved: sc => setSchedule(c.linkId, sc) }) }} onKeyDown={e => e.stopPropagation()}><Icon name="calendar" /></button>
@@ -155,6 +185,23 @@ export default function TrainerHome() {
       <div className="dim small" style={{ marginBottom: 6, lineHeight: 1.4 }}>Ссылка работает один раз до {when(fresh.expires)}. Она ваша: отправляйте только тому, кого приглашаете.</div>
       <input readOnly value={fresh.link} aria-label="Ссылка-приглашение" onFocus={e => e.target.select()} style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8 }} />
       <Button onClick={async () => toast(await copyLink(fresh.link) ? 'Ссылка скопирована' : 'Не удалось скопировать')}>Скопировать ссылку</Button>
+    </div>}
+
+    {archived.length > 0 && <div style={{ marginTop: 16 }}>
+      <button className="btn" aria-expanded={archiveOpen} onClick={() => setArchiveOpen(o => !o)}>Архив ({archived.length})</button>
+      {archiveOpen && <div className="list" style={{ marginTop: 8 }}>{archived.map(c => <div key={c.linkId} className="item" style={{ display: 'block' }}>
+        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <ProfileAvatar user={{ id: c.linkId, name: c.name, avatarUrl: c.avatarUrl }} size={32} neutral />
+          <div className="grow"><div className="tt">{c.name}</div>
+            <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + archivedText(c.archivedAt)}</div></div></div>
+        <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+          <button className="btn primary" style={{ width: 'auto' }} onClick={() => restore(c)}>Вернуть</button>
+          {c.managed && <button className="btn" style={{ width: 'auto' }} onClick={() => exportArchived(c)}>Скачать данные</button>}
+          {c.managed && <button className="btn danger" style={{ width: 'auto' }} onClick={() => removeArchived(c)}>Удалить</button>}
+          {!c.managed && <button className="btn" style={{ width: 'auto' }} onClick={() => endArchived(c)}>Завершить связь</button>}
+        </div>
+        {archiveError[c.linkId] && <div role="alert" className="small" style={{ color: 'var(--red)', marginTop: 6, lineHeight: 1.4 }}>{archiveError[c.linkId]}</div>}
+      </div>)}</div>}
     </div>}
 
     {invites.length > 0 && <Section title="Ждут ответа" footer="Ссылку можно отозвать, пока её не приняли.">

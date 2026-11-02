@@ -227,7 +227,7 @@ test('pause: set, shown in the list, changed, lifted; the place stays, the acces
   assert.equal((await who.coach.get(`/api/trainer/clients/${l1}/data`)).status, 200);
   assert.equal((await who.coach.get(`/api/trainer/clients/${l1}/doc`)).status, 200);
   const asClient = (await who.c1.get('/api/trainer/me')).body.asClient;
-  assert.equal(asClient.status, 'active'); assert.equal(asClient.pause.until, until);
+  assert.equal(asClient.status, 'active'); assert.deepEqual(asClient.pause, { until }, 'the reason is a note of the trainer, not shown to the client');
   // changing the end
   assert.equal((await pause(who.coach, l1, { until: null })).body.pause.until, null);
   assert.equal(app.db().trainerLinks.find(l => l.id === l1).pauses.length, 1);

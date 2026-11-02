@@ -51,6 +51,11 @@ export const trainerApi = {
   clientData: linkId => call('/api/trainer/clients/' + encodeURIComponent(linkId) + '/data'),
   setSchedule: (linkId, schedule) => call('/api/trainer/links/' + encodeURIComponent(linkId) + '/schedule', 'PUT', { ...schedule, tz: localTz() }),
   endLink: linkId => call('/api/trainer/links/' + encodeURIComponent(linkId), 'DELETE'),
+  // Pause and archive of a client: the trainer's time zone goes with them, the days are counted in it.
+  pause: (linkId, { until = null, reason = '' } = {}) => call('/api/trainer/links/' + encodeURIComponent(linkId) + '/pause', 'PUT', { until, ...(reason ? { reason } : {}), tz: localTz() }),
+  resume: linkId => call('/api/trainer/links/' + encodeURIComponent(linkId) + '/pause', 'DELETE', { tz: localTz() }),
+  archive: linkId => call('/api/trainer/links/' + encodeURIComponent(linkId) + '/archive', 'POST', { tz: localTz() }),
+  restore: linkId => call('/api/trainer/links/' + encodeURIComponent(linkId) + '/restore', 'POST', { tz: localTz() }),
   // Managed clients: a diary the trainer keeps for someone without Telegram.
   addManaged: body => call('/api/trainer/managed', 'POST', body),
   managed: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId)),
@@ -124,11 +129,40 @@ export function scheduleText(s) {
 
 const byTime = (a, b) => (a.time || '99:99') < (b.time || '99:99' ) ? -1 : (a.time || '99:99') > (b.time || '99:99') ? 1 : a.name.localeCompare(b.name, 'ru')
 
-/** Who comes on this ISO weekday: [{ linkId, name, time, remind }], the booked times first, by time. */
+/** Who is expected on this ISO weekday: [{ linkId, name, time, remind }], the booked times first, by time. A client on
+ *  pause is not expected (see pausedOn). */
 export function clientsOn(clients, iso) {
-  return (clients || []).filter(c => c.schedule?.days?.includes(iso))
+  return (clients || []).filter(c => c.schedule?.days?.includes(iso) && !c.pause)
     .map(c => ({ linkId: c.linkId, name: c.name, time: c.schedule.time || '', remind: !!c.schedule.remind, client: c })).sort(byTime)
 }
 
 /** The whole week for the cabinet: one entry per weekday. */
 export const weekPlan = clients => WEEKDAYS.map(w => ({ ...w, clients: clientsOn(clients, w.iso) }))
+
+// ---- pause and archive of a client ----
+// A pause keeps the place and the access; the trainer is not reminded. An archive frees the place and closes the access.
+export const PAUSE_PRESETS = [
+  { label: '1 неделя', days: 7 }, { label: '2 недели', days: 14 }, { label: 'Месяц', days: 30 }, { label: 'Без срока', days: null },
+]
+export const PAUSE_REASONS = ['Отпуск', 'Травма', 'Болезнь']
+
+const isoOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+/** The last paused day for a pause of `days` days from today (the first of them), or null for no end. */
+export function pauseUntil(days, now = new Date()) {
+  if (days == null) return null
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days - 1, 12)
+  return isoOf(d)
+}
+const shortDate = iso => {
+  const d = new Date(iso + 'T12:00:00')
+  return Number.isNaN(+d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+}
+/** "Пауза до 15 нояб. · Отпуск", "Пауза · Травма" (no end), or '' when there is none. */
+export function pauseText(pause) {
+  if (!pause) return ''
+  return [pause.until ? 'Пауза до ' + shortDate(pause.until) : 'Пауза', pause.reason].filter(Boolean).join(' · ')
+}
+/** The clients on pause who would otherwise be expected on this ISO weekday: for the muted line under "Сегодня". */
+export const pausedOnWeekday = (clients, iso) => (clients || []).filter(c => c.pause && c.schedule?.days?.includes(iso))
+/** "в архиве с 3 нояб." */
+export const archivedText = iso => (iso && shortDate(iso.slice(0, 10)) ? 'В архиве с ' + shortDate(iso.slice(0, 10)) : 'В архиве')

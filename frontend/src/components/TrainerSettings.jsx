@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { nav } from '../lib/nav.js'
-import { trainerApi, errorText, grantsText } from '../lib/trainer.js'
+import { trainerApi, errorText, grantsText, pauseText } from '../lib/trainer.js'
 import { Row, Section, Switch } from './ui.jsx'
 import { confirmSheet } from '../sheets.jsx'
 
@@ -32,10 +32,15 @@ export default function TrainerSettings() {
     catch (e) { toast(errorText(e)) }
     finally { setBusy(false) }
   }
+  // The trainer may have moved the client to the archive: the link still stands (no other trainer can be accepted) but
+  // the trainer sees nothing. Or put them on pause: the access is the same, only the reminders stop.
+  const archived = me.asClient?.status === 'archived'
   const endTrust = () => confirmSheet({
-    title: 'Прекратить доступ тренера?',
-    message: `${me.asClient.coachName} сразу перестанет видеть ваш дневник. Ваши данные останутся у вас. То, что тренер уже увидел, вернуть нельзя.`,
-    confirmText: 'Прекратить', danger: true,
+    title: archived ? 'Завершить связь с тренером?' : 'Прекратить доступ тренера?',
+    message: archived
+      ? `${me.asClient.coachName} перенёс вас в архив и сейчас не видит ваш дневник. Связь будет завершена, ваши данные останутся у вас. После этого можно принять другого тренера.`
+      : `${me.asClient.coachName} сразу перестанет видеть ваш дневник. Ваши данные останутся у вас. То, что тренер уже увидел, вернуть нельзя.`,
+    confirmText: archived ? 'Завершить' : 'Прекратить', danger: true,
     onConfirm: async () => {
       try { await trainerApi.endLink(me.asClient.linkId); toast('Доступ закрыт'); await load() }
       catch (e) { toast(errorText(e)) }
@@ -43,9 +48,12 @@ export default function TrainerSettings() {
   })
 
   return <>
-    {me.asClient && <Section title="Мой тренер" footer="Тренер только смотрит. Вы можете закрыть доступ в любой момент.">
-      <Row icon="personCircle" iconTint="var(--blue)" title={me.asClient.coachName} subtitle={'Открыто: ' + grantsText(me.asClient.grants)} />
-      <Row icon="signOut" iconTint="var(--red)" title="Прекратить доступ" danger onClick={endTrust} />
+    {me.asClient && <Section title="Мой тренер" footer={archived
+      ? 'Тренер перенёс вас в архив: он не видит ваши данные. Пока связь не завершена, принять другого тренера нельзя.'
+      : 'Тренер только смотрит. Вы можете закрыть доступ в любой момент.'}>
+      <Row icon="personCircle" iconTint="var(--blue)" title={me.asClient.coachName}
+        subtitle={archived ? 'Связь в архиве у тренера' : [me.asClient.pause ? pauseText(me.asClient.pause) : '', 'Открыто: ' + grantsText(me.asClient.grants)].filter(Boolean).join(' · ')} />
+      <Row icon="signOut" iconTint="var(--red)" title={archived ? 'Завершить связь' : 'Прекратить доступ'} danger onClick={endTrust} />
     </Section>}
     <Section title="Режим тренера"
       footer={trainer.enabled ? `Подопечных: ${trainer.clients} из ${trainer.limit}. Данные подопечных остаются у них.` : 'Тренер приглашает подопечных ссылкой и смотрит историю, замеры и статистику, которые они открыли. До 5 подопечных.'}>

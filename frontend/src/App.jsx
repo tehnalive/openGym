@@ -437,7 +437,7 @@ export default function App() {
   useEffect(() => {
     if (!isManagedMode()) return
     loadTelegram().then(prepareTelegram).catch(() => { /* a plain browser: nothing to follow */ })
-    api('/api/data/rev').catch(e => { if (e.status === 404) leaveManagedMode('Дневник подопечного недоступен: возможно, он удалён.') })
+    api('/api/data/rev').catch(e => { if (e.status === 404) leaveManagedMode('Дневник подопечного недоступен: он удалён, перенесён в архив или доступ закрыт.') })
   }, [])
   useEffect(() => { prefetchViews() }, [])
   // Android system back — sheet, then page, then press-again-to-exit (see lib/back.js)
