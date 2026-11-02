@@ -3736,7 +3736,9 @@ paths:
       description: |
         The calling trainer's active clients with a one-line summary of what they opened (and `pause` while
         the client is on pause), and the archived ones: names only, no data. Names are display names; no ids
-        but the link id.
+        but the link id. `compliance` is how the client keeps to the schedule over 7, 30 and 90 days (see
+        `TrainerCompliance`): present for every active client, an object only when the client opened the history
+        (and always for a client without Telegram), else `null`. The trainer's screens only: the client never gets it.
       responses:
         '200':
           description: The clients.
@@ -3758,6 +3760,8 @@ paths:
                         workouts: { type: integer, description: 'Only with the history or stats grant.' }
                         lastWorkout: { type: string, nullable: true }
                         pause: { $ref: '#/components/schemas/TrainerPause' }
+                        schedule: { type: object, nullable: true }
+                        compliance: { $ref: '#/components/schemas/TrainerCompliance' }
                   archived:
                     type: array
                     items:
@@ -3799,6 +3803,7 @@ paths:
                   state: { type: object }
                   rev: { type: integer }
                   name: { type: string }
+                  compliance: { $ref: '#/components/schemas/TrainerCompliance' }
                   grants:
                     type: object
                     properties:
@@ -3866,6 +3871,8 @@ paths:
                   name: { type: string }
                   since: { type: string, format: date-time }
                   grants: { $ref: '#/components/schemas/TrainerGrants' }
+                  schedule: { type: object, nullable: true }
+                  compliance: { $ref: '#/components/schemas/TrainerCompliance' }
                   data: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
@@ -3943,6 +3950,8 @@ paths:
                   name: { type: string }
                   note: { type: string }
                   managed: { type: boolean }
+                  schedule: { type: object, nullable: true }
+                  compliance: { $ref: '#/components/schemas/TrainerCompliance' }
                   rev: { type: integer }
                   data: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -4510,6 +4519,42 @@ components:
         since: { type: string, format: date-time }
         until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
         reason: { type: string }
+    TrainerCompliance:
+      type: object
+      nullable: true
+      description: |
+        How well the client keeps to the schedule the trainer set, for the trainer's screens (never the client's).
+        `null` when the client did not open the history. Each window is N days ending yesterday (today joins it
+        only once a workout is logged today), not starting before the link did. `planned` is the days of the
+        window whose weekday is in the schedule, minus the days of pause and archive; `done` is the planned days
+        with a workout plus workouts on other days (a moved session), never more than `planned`; one day with
+        several workouts counts once. `pct` is round(done / planned * 100), or null when nothing was planned
+        (no schedule, or only pause): "no plan", never 0 %. `workouts` is the training days in the window either way.
+        Dates are YYYY-MM-DD: the trainer's day, and the client's own dates of their workouts.
+      properties:
+        d7: { $ref: '#/components/schemas/TrainerComplianceWindow' }
+        d30: { $ref: '#/components/schemas/TrainerComplianceWindow' }
+        d90: { $ref: '#/components/schemas/TrainerComplianceWindow' }
+        hasSchedule: { type: boolean, description: 'The schedule has at least one day.' }
+        lastWorkout: { type: string, nullable: true }
+        daysSinceLast: { type: integer, nullable: true, description: 'Days from the last workout to the trainer''s today; null when there is none.' }
+        attention:
+          type: string
+          nullable: true
+          enum: [quiet, drop]
+          description: |
+            `quiet`: no workout for 7 days or more, counted from the latest of the last workout, the start of the link and
+            the day the client came back from a pause or the archive. `drop`: the 7 day percentage is 20 points or more
+            below the 30 day one, with at least 4 planned days in the 30. Never during a pause. null otherwise.
+    TrainerComplianceWindow:
+      type: object
+      properties:
+        planned: { type: integer }
+        done: { type: integer }
+        pct: { type: integer, nullable: true, minimum: 0, maximum: 100 }
+        workouts: { type: integer }
+        from: { type: string, nullable: true }
+        to: { type: string, nullable: true }
     TrainerGrants:
       type: object
       description: What a client opened to the trainer. Photos and the AI coach chat cannot be opened. `stats` needs `history`.

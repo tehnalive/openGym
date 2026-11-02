@@ -166,3 +166,66 @@ export function pauseText(pause) {
 export const pausedOnWeekday = (clients, iso) => (clients || []).filter(c => c.pause && c.schedule?.days?.includes(iso))
 /** "в архиве с 3 нояб." */
 export const archivedText = iso => (iso && shortDate(iso.slice(0, 10)) ? 'В архиве с ' + shortDate(iso.slice(0, 10)) : 'В архиве')
+
+// ---- plan compliance over 7, 30 and 90 days (TG14, section 15 of docs/telegram/TRAINER_MODE.md) ----
+// The server counts it (api/trainer-compliance.js) and sends it to the trainer only; these helpers only word it. The
+// client never has a percentage of their own on any screen.
+export const PCT_GOOD = 80   // from here on green, from PCT_OK yellow (amber), below red
+export const PCT_OK = 50
+/** The theme colour of a percentage, or '' when there is none. */
+export const pctColor = pct => (pct == null ? '' : pct >= PCT_GOOD ? 'var(--green)' : pct >= PCT_OK ? 'var(--orange)' : 'var(--red)')
+export const pctText = pct => (pct == null ? '' : pct + '%')
+
+/** "тренировался сегодня", "тренировался вчера", "был 3 дн. назад", "ещё не тренировался". */
+export function seenText(compliance) {
+  const n = compliance ? compliance.daysSinceLast : null
+  return n == null ? 'ещё не тренировался' : n === 0 ? 'тренировался сегодня' : n === 1 ? 'тренировался вчера' : `был ${n} дн. назад`
+}
+
+/** What a row of the cabinet shows for a client: { pct, color, note } where `pct` is the 30 day percentage to put on the
+ *  right ('' when there is none) and `note` the line about the plan when there is no percentage. null for a client whose
+ *  history is closed. A client on pause has no percentage: the pause line stays instead. */
+export function rowCompliance(client) {
+  const c = client && client.compliance
+  if (!c) return null
+  const w = c.d30 || {}
+  const trained = `${w.workouts || 0} трен. за 30 дн.`
+  if (client.pause) return { pct: '', color: '', note: '', seen: seenText(c) }
+  if (w.pct != null) return { pct: pctText(w.pct), color: pctColor(w.pct), note: '', seen: seenText(c), aria: `Соблюдение плана за 30 дней: ${w.pct}%` }
+  return { pct: '', color: '', note: (c.hasSchedule ? 'пока нечего считать' : 'нет плана') + ' · ' + trained, seen: seenText(c) }
+}
+
+/** The clients who need a look, with the line for each: those who went quiet (longest first), then the ones whose week
+ *  fell (the lowest first). A client on pause has no signal (the server sends none, and the row says so again here). */
+export function attentionItems(clients) {
+  const quiet = [], drop = []
+  for (const c of clients || []) {
+    const a = c.compliance && !c.pause ? c.compliance.attention : null
+    if (a === 'quiet') {
+      const n = c.compliance.daysSinceLast
+      quiet.push({ linkId: c.linkId, name: c.name, kind: 'quiet', days: n, text: n == null ? `${c.name}: ещё не тренировался` : `${c.name}: не тренировался ${n} дн.`, client: c })
+    } else if (a === 'drop') {
+      drop.push({ linkId: c.linkId, name: c.name, kind: 'drop', pct: c.compliance.d7.pct, text: `${c.name}: соблюдение за неделю упало до ${c.compliance.d7.pct}%`, client: c })
+    }
+  }
+  quiet.sort((x, y) => (y.days ?? Infinity) - (x.days ?? Infinity))
+  drop.sort((x, y) => x.pct - y.pct)
+  return [...quiet, ...drop]
+}
+
+/** The list with the clients who need attention first, the rest in their order. */
+export function sortByAttention(clients) {
+  const first = attentionItems(clients).map(x => x.client)
+  return [...first, ...(clients || []).filter(c => !first.includes(c))]
+}
+
+export const COMPLIANCE_WINDOWS = [{ key: 'd7', label: '7 дней' }, { key: 'd30', label: '30 дней' }, { key: 'd90', label: '90 дней' }]
+/** The three tiles of the client screen: { key, label, pct (text), color, sub }. */
+export function complianceTiles(compliance) {
+  if (!compliance) return []
+  return COMPLIANCE_WINDOWS.map(({ key, label }) => {
+    const w = compliance[key] || {}
+    if (w.pct != null) return { key, label, pct: pctText(w.pct), color: pctColor(w.pct), sub: `выполнено ${w.done} из ${w.planned}` }
+    return { key, label, pct: '–', color: '', sub: compliance.hasSchedule ? 'нечего считать' : `${w.workouts || 0} трен.` }
+  })
+}

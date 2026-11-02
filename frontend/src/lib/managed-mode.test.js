@@ -1,7 +1,7 @@
 // Managed mode (TG14): the trainer's app opened in a client's name must not touch the trainer's own storage and
 // must not reach any API route but the client's diary. Run against a fake window, so the guards are the real ones.
 import { describe, it, expect, vi } from 'vitest'
-import { enterReadonlyMode, shownLang, routeFor, scoped, detect, installManagedGuards, apiPathOf, managedConfig, enterManagedMode, leaveManagedMode, takeManagedNotice, MANAGED_PREFIX } from './managed-mode.js'
+import { readonlyCompliance, subscribeCompliance, enterReadonlyMode, shownLang, routeFor, scoped, detect, installManagedGuards, apiPathOf, managedConfig, enterManagedMode, leaveManagedMode, takeManagedNotice, MANAGED_PREFIX } from './managed-mode.js'
 
 const ID = 'gDzEuZgmpoBd'
 
@@ -271,6 +271,26 @@ describe('a Telegram client read only', () => {
     win.localStorage.setItem('gym_state_v1', 'x')
     expect(win.localStorage.m.has(MANAGED_PREFIX(ID) + 'gym_state_v1')).toBe(true)
     expect(win.localStorage.m.has('gym_state_v1')).toBe(false)
+  })
+
+  it('keeps the plan compliance the document answer carries, for the trainer\'s Home, and tells the screen', async () => {
+    const C = { d7: { planned: 6, done: 5, pct: 83 }, hasSchedule: true }
+    const real = vi.fn(async url => new Response(JSON.stringify(String(url).endsWith('/doc') ? { state: { workouts: [] }, rev: 7, compliance: C } : { rev: 7 })))
+    const win = fakeWindow({ fetchImpl: real })
+    installManagedGuards(win, RO)
+    const heard = vi.fn(); const off = subscribeCompliance(heard)
+    expect(readonlyCompliance()).toBe(null)
+    await win.fetch('/api/data')
+    await new Promise(r => setTimeout(r, 0))
+    expect(readonlyCompliance()).toEqual(C)
+    expect(heard).toHaveBeenCalledTimes(1)
+    await win.fetch('/api/data/rev')   // the revision poll carries no compliance: it is not wiped
+    await new Promise(r => setTimeout(r, 0))
+    expect(readonlyCompliance()).toEqual(C)
+    await win.fetch('/api/data')   // the same answer again is not a change
+    await new Promise(r => setTimeout(r, 0))
+    expect(heard).toHaveBeenCalledTimes(1)
+    off()
   })
 
   it('keeps the kind and the grants in the flag, and drops what is not a grant', () => {

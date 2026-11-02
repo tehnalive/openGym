@@ -6,14 +6,15 @@
 // The ordinary History, Stats and Measures screens are not used: each has a dozen entry points that change the
 // diary (edit, repeat, delete, log), and a read only diary must have none. These are the trainer's read only
 // components (views/TrainerClient.jsx) on the same document.
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
-import { diaryGrants, managedInfo } from '../lib/managed-mode.js'
+import { diaryGrants, managedInfo, readonlyCompliance, subscribeCompliance } from '../lib/managed-mode.js'
 import { clientView, workoutRows } from '../lib/trainer.js'
 import { fmtDate, fmtNum } from '../lib/format.js'
 import { History, Measures, Muscles, WorkoutCard } from './TrainerClient.jsx'
 import Icon from '../components/Icon.jsx'
+import { ComplianceBlock } from '../components/TrainerCompliance.jsx'
 
 const CLOSED = 'Подопечный не открыл этот раздел.'
 const Closed = () => <div className="empty" role="status"><div className="ico"><Icon name="lock" /></div>{CLOSED}</div>
@@ -35,8 +36,10 @@ export function ReadonlyHome() {
   const rows = useMemo(() => workoutRows(view).slice(0, 3), [view])
   const weights = [...view.bodyweight].filter(b => b?.d).sort((a, b) => (a.d < b.d ? 1 : -1))
   const last = weights[0]
+  const compliance = useSyncExternalStore(subscribeCompliance, readonlyCompliance)
   return <>
     <Header title={'Профиль: ' + name} sub="Вы в режиме тренера · только чтение" />
+    {grants.history && <ComplianceBlock compliance={compliance} />}
     <div className="card" style={{ marginBottom: 12 }}>
       <div className="tt" style={{ marginBottom: 6 }}>Последние тренировки</div>
       {!grants.history ? <Closed />

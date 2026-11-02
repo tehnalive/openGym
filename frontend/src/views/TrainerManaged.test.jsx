@@ -242,3 +242,33 @@ describe('the week of the trainer in the cabinet', () => {
     act(() => r2.unmount()); box.remove()
   })
 })
+
+describe('plan compliance on the data screen of a client without Telegram', () => {
+  const w = (planned, done) => ({ planned, done, workouts: done, pct: planned ? Math.round(done * 100 / planned) : null })
+  it('shows the three tiles, and the schedule button when there is none, then reads the numbers again after it is saved', async () => {
+    const none = { d7: w(0, 0), d30: w(0, 0), d90: w(0, 0), hasSchedule: false, lastWorkout: null, daysSinceLast: null, attention: null }
+    const set = { d7: w(6, 5), d30: w(24, 12), d90: w(70, 50), hasSchedule: true, lastWorkout: '2026-11-01', daysSinceLast: 3, attention: null }
+    let answer = { ...DIARY(), schedule: null, compliance: none }
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/managed/link-mmmm-1': () => answer }))
+    const host = mount('/trainer/m/link-mmmm-1')
+    await flush()
+    const block = host.querySelector('[aria-label="Соблюдение плана"]')
+    expect(block.textContent).toContain('Задайте расписание, чтобы видеть соблюдение плана')
+    click([...block.querySelectorAll('button')].find(b => b.textContent === 'Задать расписание'))
+    expect(useUI.getState().sheets.length).toBe(1)
+    // Save a schedule in the sheet itself: the screen reads the numbers again.
+    answer = { ...DIARY(), schedule: { days: [1, 3], time: '', remind: false }, compliance: set }
+    mocks.api.mockImplementation(route({
+      'PUT /api/trainer/links/link-mmmm-1/schedule': { schedule: { days: [1, 3], time: '', remind: false } },
+      'GET /api/trainer/managed/link-mmmm-1': () => answer }))
+    const sheetHost = document.createElement('div'); document.body.appendChild(sheetHost)
+    const sheetRoot = createRoot(sheetHost); mounted.push(sheetRoot)
+    act(() => sheetRoot.render(useUI.getState().sheets.at(-1).render(() => {})))
+    click(sheetHost.querySelector('[aria-label="Понедельник"]'))
+    click([...sheetHost.querySelectorAll('button')].find(b => b.textContent === 'Сохранить'))
+    await flush(); await flush()
+    const after = host.querySelector('[aria-label="Соблюдение плана"]')
+    expect(after.textContent).toContain('83%'); expect(after.textContent).toContain('выполнено 12 из 24')
+    expect(after.querySelectorAll('button')).toHaveLength(0)
+  })
+})

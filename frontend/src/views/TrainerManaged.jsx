@@ -11,6 +11,8 @@ import { copyLink } from '../lib/plan-link.js'
 import Icon from '../components/Icon.jsx'
 import { confirmSheet } from '../sheets.jsx'
 import ClientLifecycle from '../components/TrainerLifecycle.jsx'
+import { ComplianceBlock } from '../components/TrainerCompliance.jsx'
+import { scheduleSheet } from '../components/TrainerSchedule.jsx'
 
 const toast = m => useUI.getState().toast(m)
 
@@ -27,6 +29,10 @@ export default function TrainerManaged() {
     return () => { gone = true }
   }, [linkId])
   const back = () => nav('/trainer')
+  // A new schedule changes the plan the percentages are counted against: read them again.
+  const planSheet = () => scheduleSheet({ linkId, name: res.name, schedule: res.schedule, onSaved: () => {
+    trainerApi.managed(linkId).then(r => setRes(x => (x ? { ...x, schedule: r.schedule, compliance: r.compliance } : x))).catch(() => {})
+  } })
   const counts = res ? (() => { const v = clientView(res.data); return `${v.workouts.length} трен., ${v.bodyweight.length} взвеш., ${v.measurements.length} замеров` })() : ''
 
   const exportData = async () => {
@@ -64,6 +70,7 @@ export default function TrainerManaged() {
         {res.note && <div className="dim small" style={{ lineHeight: 1.4, marginTop: 4 }}>{res.note}</div>}
         <div className="dim small" style={{ lineHeight: 1.4, marginTop: 4 }}>В дневнике: {counts}</div>
       </div>
+      <ComplianceBlock compliance={res.compliance} onSchedule={planSheet} />
       <button className="btn primary" style={{ marginBottom: 12 }} onClick={() => openManagedDiary(res.linkId || linkId, res.name)}>Открыть дневник</button>
       <ClientLifecycle linkId={linkId} name={res.name} pause={res.pause} onArchived={back} />
       <div className="dim small" style={{ margin: '14px 0 8px', lineHeight: 1.4 }}>

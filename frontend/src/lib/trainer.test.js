@@ -4,7 +4,7 @@ import {
   trainerTokenOf, launchOf, shareIdOf, capturePendingShare, peekPendingTrainer, takePendingTrainer, clearPendingTrainer,
   peekPendingShare, clearPendingShare, takePendingShare,
 } from './plan-link.js'
-import { normalizeGrants, canConsent, grantsText, clientView, workoutRows, muscleRows, daysSince, ago, errorText } from './trainer.js'
+import { normalizeGrants, canConsent, grantsText, clientView, workoutRows, muscleRows, daysSince, ago, errorText, pctColor, seenText, rowCompliance, attentionItems, sortByAttention, complianceTiles } from './trainer.js'
 import { EXDB } from './exercises.js'
 
 const TOKEN = 't_' + 'A1b2C3d4E5f6G7h8I9j0K_'   // 22 characters after the prefix
@@ -169,5 +169,58 @@ describe('pause and archive helpers', () => {
     expect(weekPlan(clients)[0].clients.map(x => x.name)).toEqual(['Вася'])
     expect(pausedOnWeekday(clients, 1).map(x => x.name)).toEqual(['Петя'])
     expect(pausedOnWeekday(clients, 2)).toEqual([])
+  })
+})
+
+describe('plan compliance wording', () => {
+  const win = (planned, done, workouts = done) => ({ planned, done, workouts, pct: planned ? Math.round(done * 100 / planned) : null })
+  const comp = (extra = {}) => ({ d7: win(6, 5), d30: win(24, 20), d90: win(70, 50), hasSchedule: true, lastWorkout: '2026-11-01', daysSinceLast: 3, attention: null, ...extra })
+
+  it('colours by the thresholds: 80 and up green, 50 to 79 amber, under 50 red, none for no plan', () => {
+    expect([100, 80, 79, 50, 49, 0].map(pctColor)).toEqual(['var(--green)', 'var(--green)', 'var(--orange)', 'var(--orange)', 'var(--red)', 'var(--red)'])
+    expect([pctColor(null), pctColor(undefined)]).toEqual(['', ''])
+  })
+
+  it('says when the client was last seen', () => {
+    expect([null, 0, 1, 3].map(n => seenText({ daysSinceLast: n }))).toEqual(['ещё не тренировался', 'тренировался сегодня', 'тренировался вчера', 'был 3 дн. назад'])
+    expect(seenText(null)).toBe('ещё не тренировался')
+  })
+
+  it('a row: the 30 day percentage with its colour; none while on pause; the plan line without a plan; nothing without the history', () => {
+    expect(rowCompliance({ compliance: comp() })).toMatchObject({ pct: '83%', color: 'var(--green)', note: '', seen: 'был 3 дн. назад' })
+    expect(rowCompliance({ compliance: comp({ d30: win(24, 10) }) })).toMatchObject({ pct: '42%', color: 'var(--red)' })
+    expect(rowCompliance({ pause: { until: null }, compliance: comp() })).toMatchObject({ pct: '', note: '' })
+    expect(rowCompliance({ compliance: comp({ hasSchedule: false, d30: win(0, 0, 6) }) })).toMatchObject({ pct: '', note: 'нет плана · 6 трен. за 30 дн.' })
+    expect(rowCompliance({ compliance: comp({ d30: win(0, 0, 2) }) }).note).toBe('пока нечего считать · 2 трен. за 30 дн.')
+    expect(rowCompliance({ compliance: null })).toBe(null)
+    expect(rowCompliance({})).toBe(null)
+  })
+
+  it('the attention list: quiet first (the longest), then the falls (the lowest); not on pause; no long dashes', () => {
+    const clients = [
+      { linkId: 'a', name: 'Анна', compliance: comp() },
+      { linkId: 'b', name: 'Иван', compliance: comp({ attention: 'quiet', daysSinceLast: 9 }) },
+      { linkId: 'c', name: 'Мария', compliance: comp({ attention: 'drop', d7: win(5, 2) }) },
+      { linkId: 'd', name: 'Олег', compliance: comp({ attention: 'quiet', daysSinceLast: 20 }) },
+      { linkId: 'e', name: 'Ира', pause: { until: null }, compliance: comp({ attention: 'quiet', daysSinceLast: 30 }) },
+      { linkId: 'f', name: 'Юра', compliance: comp({ attention: 'quiet', daysSinceLast: null }) },
+      { linkId: 'g', name: 'Лена', compliance: null },
+    ]
+    const items = attentionItems(clients)
+    expect(items.map(x => x.text)).toEqual([
+      'Юра: ещё не тренировался', 'Олег: не тренировался 20 дн.', 'Иван: не тренировался 9 дн.', 'Мария: соблюдение за неделю упало до 40%'])
+    expect(items.every(x => !x.text.includes('—'))).toBe(true)
+    expect(sortByAttention(clients).map(c => c.name)).toEqual(['Юра', 'Олег', 'Иван', 'Мария', 'Анна', 'Ира', 'Лена'])
+    expect(attentionItems(null)).toEqual([])
+  })
+
+  it('three tiles: percent and "выполнено 5 из 6"; a dash and the count of workouts without a plan', () => {
+    expect(complianceTiles(comp())).toEqual([
+      { key: 'd7', label: '7 дней', pct: '83%', color: 'var(--green)', sub: 'выполнено 5 из 6' },
+      { key: 'd30', label: '30 дней', pct: '83%', color: 'var(--green)', sub: 'выполнено 20 из 24' },
+      { key: 'd90', label: '90 дней', pct: '71%', color: 'var(--orange)', sub: 'выполнено 50 из 70' }])
+    const none = complianceTiles(comp({ hasSchedule: false, d7: win(0, 0, 2), d30: win(0, 0, 6), d90: win(0, 0, 9) }))
+    expect(none.map(t => [t.pct, t.sub])).toEqual([['–', '2 трен.'], ['–', '6 трен.'], ['–', '9 трен.']])
+    expect(complianceTiles(null)).toEqual([])
   })
 })

@@ -32,6 +32,7 @@ import {
   newToken, newId, hashToken, inviteLink, displayName, isTrainer, activeLinks, archivedLinks, currentLink, inviteState, pruneInvites, checkGrants,
   trimForTrainer, summaryOf, LABEL_MAX, checkPause, startPause, endPause, archiveLink, restoreLink, pauseOf, ARCHIVE_LIMIT
 } from './trainer.js';
+import { complianceOf } from './trainer-compliance.js';
 import {
   isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId,
 } from './trainer-managed.js';
@@ -2256,6 +2257,13 @@ function trainerToday(user) {
   const tz = user.trainer && user.trainer.tz;
   return (tz && userNow(tz)?.date) || new Date().toISOString().slice(0, 10);
 }
+// How well the client keeps to the plan (trainer-compliance.js), for the trainer's screens. Only with the history
+// opened (a managed client has everything open); `S` is the document already read for this request, so a client's file
+// is read once. null when the history is closed or the document is unreadable.
+function trainerCompliance(user, link, S) {
+  if (!link.grants || !link.grants.history || S === UNREADABLE) return null;
+  return complianceOf({ workouts: S && S.workouts, schedule: link.schedule, link, today: trainerToday(user), tz: user.trainer && user.trainer.tz });
+}
 // The trainer's day for a request that carries the app's time zone (`tz`): the zone is kept for the reminders, as the
 // schedule does, and the day is counted in it.
 function trainerDayFor(user, body) {
@@ -2785,7 +2793,8 @@ const routes = {
       clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants, ...clientAvatar(client, link), schedule: link.schedule || null,
         pause: pauseOf(link, today),
         ...(link.managed ? { managed: true, note: link.note || '' } : {}),
-        ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}) });
+        ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}),
+        compliance: trainerCompliance(user, link, S) });
     }
     // The archive: names only, no data (the trainer's access is closed until the client is restored).
     const archived = [];
@@ -2813,7 +2822,7 @@ const routes = {
     if (!(trainerReadNoted.get(t.link.id) > now - 600000)) { trainerReadNoted.set(t.link.id, now); audit(req, 'trainer.read', { user, target: t.client }); }
     const open = trimForTrainer(S || {}, t.link.grants);
     const state = { workouts: [], routines: [], bodyweight: [], measurements: [], customEx: [], ...open };
-    json(res, 200, { state, rev: S?._rev || 0, name: displayName(t.client), grants: t.link.grants });
+    json(res, 200, { state, rev: S?._rev || 0, name: displayName(t.client), grants: t.link.grants, compliance: trainerCompliance(user, t.link, S) });
   },
   'GET /api/trainer/clients/{id}/doc/rev': async (req, res) => {
     const user = trainerCaller(req, res);
@@ -2842,7 +2851,7 @@ const routes = {
     if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Данные подопечного сейчас не читаются, попробуйте позже');
     const now = Date.now();
     if (!(trainerReadNoted.get(link.id) > now - 600000)) { trainerReadNoted.set(link.id, now); audit(req, 'trainer.read', { user, target: client }); }
-    json(res, 200, { linkId: link.id, name: displayName(client), ...clientAvatar(client, link), grants: link.grants, since: link.consentAt, pause: pauseOf(link, trainerToday(user)), data: trimForTrainer(S || {}, link.grants) });
+    json(res, 200, { linkId: link.id, name: displayName(client), ...clientAvatar(client, link), grants: link.grants, since: link.consentAt, pause: pauseOf(link, trainerToday(user)), schedule: link.schedule || null, compliance: trainerCompliance(user, link, S), data: trimForTrainer(S || {}, link.grants) });
   },
   // Managed clients (TG14): a diary the trainer keeps for someone without Telegram. A profile with no way in
   // (isManaged: sessionUser refuses it); every route here is the owning trainer's, and anything else reads as
@@ -2886,7 +2895,7 @@ const routes = {
     if (!t) return;
     const S = readStateStrict(t.client.id);
     if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
-    json(res, 200, { linkId: t.link.id, name: displayName(t.client), note: t.link.note || '', managed: true, pause: pauseOf(t.link, trainerToday(user)), rev: S?._rev || 0, data: managedView(S || {}) });
+    json(res, 200, { linkId: t.link.id, name: displayName(t.client), note: t.link.note || '', managed: true, pause: pauseOf(t.link, trainerToday(user)), schedule: t.link.schedule || null, compliance: trainerCompliance(user, t.link, S), rev: S?._rev || 0, data: managedView(S || {}) });
   },
   'POST /api/trainer/managed/{id}/ops': async (req, res) => {
     const user = trainerCaller(req, res);

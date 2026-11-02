@@ -34,6 +34,19 @@ export const isReadonlyMode = () => info !== null && info.kind === 'readonly'
 /** What the client opened (history, measures, stats) in a read only diary; everything for a managed one. */
 export const diaryGrants = () => (info && info.kind === 'readonly' ? info.grants : { history: true, measures: true, stats: true })
 export const managedInfo = () => info
+
+// The plan compliance of the client in a read only diary: the document route sends it along with the document, the
+// trainer's Home shows it. Held here, in memory, as the revision is; nothing of it is written anywhere.
+let compliance = null
+const complianceListeners = new Set()
+export const readonlyCompliance = () => compliance
+export function subscribeCompliance(fn) { complianceListeners.add(fn); return () => complianceListeners.delete(fn) }
+function setCompliance(c) {
+  const next = c && typeof c === 'object' ? c : null
+  if (JSON.stringify(next) === JSON.stringify(compliance)) return
+  compliance = next
+  for (const fn of [...complianceListeners]) fn()
+}
 export const managedUserId = id => 'managed-' + id
 
 /* ------------------------------------------------------------------------------------ the flag */
@@ -201,7 +214,7 @@ function guardFetch(win, i) {
     if (isReq && !(init && init.body) && method !== 'GET' && method !== 'HEAD') next.body = input.clone().body
     const answer = real(target.base + r.path + r.search, next)
     // A read only diary remembers the revision the server has, to answer its own pushes with it (see 'swallow').
-    return r.track ? answer.then(res => { res.clone().json().then(b => { if (b && Number.isFinite(b.rev)) { seen.rev = b.rev; seen.wid = typeof b.wid === 'string' ? b.wid : seen.wid } }).catch(() => {}); return res }) : answer
+    return r.track ? answer.then(res => { res.clone().json().then(b => { if (b && Number.isFinite(b.rev)) { seen.rev = b.rev; seen.wid = typeof b.wid === 'string' ? b.wid : seen.wid } if (b && 'compliance' in b) setCompliance(b.compliance) }).catch(() => {}); return res }) : answer
   }
 }
 

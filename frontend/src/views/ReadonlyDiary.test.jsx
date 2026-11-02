@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
-const mocks = vi.hoisted(() => ({ grants: { history: true, measures: false, stats: false }, leave: vi.fn() }))
+const mocks = vi.hoisted(() => ({ grants: { history: true, measures: false, stats: false }, leave: vi.fn(), compliance: null }))
 vi.mock('../lib/managed-mode.js', async importOriginal => ({
   ...(await importOriginal()),
   isManagedMode: () => true,
@@ -12,6 +12,8 @@ vi.mock('../lib/managed-mode.js', async importOriginal => ({
   diaryGrants: () => mocks.grants,
   managedInfo: () => ({ id: 'gDzEuZgmpoBd', name: 'Мария', kind: 'readonly', grants: mocks.grants }),
   leaveManagedMode: mocks.leave,
+  readonlyCompliance: () => mocks.compliance,
+  subscribeCompliance: () => () => {},
 }))
 
 import { useStore } from '../store/useStore.js'
@@ -35,6 +37,7 @@ beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   mocks.grants = { history: true, measures: false, stats: false }
   mocks.leave.mockReset()
+  mocks.compliance = null
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
   useStore.setState({ user: { id: 'managed-gDzEuZgmpoBd', name: 'Мария' } })
   useStore.setState(s => ({ S: { ...s.S, active: null, unit: 'kg',
@@ -51,6 +54,25 @@ describe('a Telegram client\'s diary read only', () => {
     expect(host.querySelector('.hdr .sub').textContent).toBe('Вы в режиме тренера · только чтение')
     expect(host.textContent).toContain('Верх')
     expect(host.textContent).not.toMatch(/Привет|Hi /)
+  })
+
+  it('shows the plan compliance the document carried, with no button to change the plan', async () => {
+    const w = (planned, done) => ({ planned, done, workouts: done, pct: Math.round(done * 100 / planned) })
+    mocks.compliance = { d7: w(6, 5), d30: w(24, 12), d90: w(70, 50), hasSchedule: true, lastWorkout: '2026-11-01', daysSinceLast: 3, attention: null }
+    mount()
+    await flush()
+    const block = host.querySelector('[aria-label="Соблюдение плана"]')
+    expect(block.textContent).toContain('83%'); expect(block.textContent).toContain('выполнено 12 из 24')
+    act(() => root.unmount()); root = createRoot(host)
+    mocks.compliance = { ...mocks.compliance, hasSchedule: false }
+    mount(); await flush()
+    expect(host.querySelector('[aria-label="Соблюдение плана"]').textContent).toContain('Задайте расписание')
+    expect(host.querySelector('[aria-label="Соблюдение плана"] button')).toBe(null)   // a read only diary changes nothing
+  })
+
+  it('shows no compliance block before the document came', async () => {
+    mount(); await flush()
+    expect(host.querySelector('[aria-label="Соблюдение плана"]')).toBe(null)
   })
 
   it('has nothing that writes or starts a workout: no fields, no Start, no plan, no library', async () => {

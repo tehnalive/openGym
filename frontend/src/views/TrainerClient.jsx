@@ -17,6 +17,8 @@ import Icon from '../components/Icon.jsx'
 import { confirmSheet } from '../sheets.jsx'
 import ProfileAvatar from '../components/ProfileAvatar.jsx'
 import ClientLifecycle from '../components/TrainerLifecycle.jsx'
+import { ComplianceBlock } from '../components/TrainerCompliance.jsx'
+import { scheduleSheet } from '../components/TrainerSchedule.jsx'
 
 const nameOf = e => (EXIDX[e.id] ? exerciseNameFor(EXIDX[e.id]) : (e.n || e.id || 'Упражнение'))
 
@@ -130,6 +132,10 @@ export default function TrainerClient() {
       .catch(e => { if (!gone) setError(errorText(e)) })
     return () => { gone = true }
   }, [linkId])
+  // A new schedule changes the plan the percentages are counted against: read them again.
+  const planSheet = () => scheduleSheet({ linkId, name: res.name, schedule: res.schedule, onSaved: () => {
+    trainerApi.clientData(linkId).then(r => setRes(x => (x ? { ...x, schedule: r.schedule, compliance: r.compliance } : x))).catch(() => {})
+  } })
   const view = useMemo(() => res && clientView(res.data), [res])
   const tabs = res ? SECTIONS.filter(s => res.grants[s.key]) : []
   const back = () => nav('/trainer')
@@ -145,6 +151,7 @@ export default function TrainerClient() {
     </>}
     {res && settings && <ClientSettings res={res} linkId={linkId} onDone={back} />}
     {res && !settings && <>
+      <ComplianceBlock compliance={res.compliance} onSchedule={planSheet} />
       {tabs.length > 1 && <Segmented className="seg-range" value={tab} onChange={setTab} options={tabs.map(s => ({ value: s.key, label: s.short }))} />}
       <div style={{ height: 10 }} />
       {tab === 'history' && <History view={view} />}

@@ -113,6 +113,93 @@ describe('TrainerHome', () => {
   })
 })
 
+const WIN = (planned, done, workouts = done) => ({ planned, done, workouts, pct: planned ? Math.round(done * 100 / planned) : null })
+const COMP = (extra = {}) => ({ d7: WIN(6, 5), d30: WIN(24, 20), d90: WIN(70, 50), hasSchedule: true, lastWorkout: '2026-11-01', daysSinceLast: 3, attention: null, ...extra })
+const GR = { history: true, measures: true, stats: true }
+const ROWS = { limit: 5, clients: [
+  { linkId: 'link-cccc-3', name: 'Анна', since: '2026-10-01T00:00:00Z', grants: GR, workouts: 20, lastWorkout: '2026-11-01', schedule: { days: [1, 3], time: '', remind: false }, compliance: COMP() },
+  { linkId: 'link-dddd-4', name: 'Иван', since: '2026-10-01T00:00:00Z', grants: GR, workouts: 5, lastWorkout: '2026-10-25', compliance: COMP({ attention: 'quiet', daysSinceLast: 9, hasSchedule: false, d30: WIN(0, 0, 6) }) },
+  { linkId: 'link-eeee-5', name: 'Мария', since: '2026-10-01T00:00:00Z', grants: GR, workouts: 30, lastWorkout: '2026-11-03', managed: true, compliance: COMP({ attention: 'drop', daysSinceLast: 1, d7: WIN(5, 2), d30: WIN(20, 18) }) },
+  { linkId: 'link-ffff-6', name: 'Олег', since: '2026-10-01T00:00:00Z', grants: GR, workouts: 8, lastWorkout: '2026-11-04', pause: { since: '2026-11-01T00:00:00Z', until: null }, compliance: COMP({ daysSinceLast: 0, d30: WIN(10, 2) }) },
+] }
+
+describe('TrainerHome: plan compliance', () => {
+  const rowOf = (host, name) => [...host.querySelectorAll('.list .item')].find(x => x.textContent.includes(name))
+  it('shows the 30 day percentage in colour, when the client was last seen, and the plan line without a plan', async () => {
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/me': ME, '/api/trainer/clients': ROWS }))
+    const host = mount(routes, '/trainer')
+    await flush()
+    const anna = rowOf(host, 'Анна')
+    expect(anna.textContent).toContain('83%')
+    expect(anna.textContent).toContain('был 3 дн. назад')
+    expect(anna.querySelector('[title="Соблюдение плана за 30 дней"]').style.color).toBe('var(--green)')
+    const maria = rowOf(host, 'Мария')
+    expect(maria.textContent).toContain('90%')
+    expect(maria.textContent).toContain('Без Telegram · тренировался вчера')
+    const ivan = rowOf(host, 'Иван')
+    expect(ivan.textContent).toContain('нет плана · 6 трен. за 30 дн.')
+    expect(ivan.textContent).not.toContain('%')
+    // On pause: no percentage, the pause line stays.
+    const oleg = rowOf(host, 'Олег')
+    expect(oleg.textContent).not.toContain('%')
+    expect(oleg.textContent).toContain('Пауза')
+  })
+
+  it('puts "Нужно внимание" on top, and those clients first in the list', async () => {
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/me': ME, '/api/trainer/clients': ROWS }))
+    const host = mount(routes, '/trainer')
+    await flush()
+    const card = host.querySelector('[aria-label="Нужно внимание"]')
+    expect(card.textContent).toContain('Иван: не тренировался 9 дн.')
+    expect(card.textContent).toContain('Мария: соблюдение за неделю упало до 40%')
+    expect(card.textContent).not.toContain('Анна')
+    expect(card.textContent).not.toContain('Олег')
+    const names = [...host.querySelectorAll('.list .item .tt')].map(x => x.textContent).filter(x => ['Анна', 'Иван', 'Мария', 'Олег'].includes(x))
+    expect(names).toEqual(['Иван', 'Мария', 'Анна', 'Олег'])
+    click(card.querySelector('[role=button]'))   // opens the client
+    expect(mocks.enterRo).toHaveBeenCalledWith('link-dddd-4', 'Иван', expect.any(String), expect.anything())
+  })
+
+  it('has no such card when nobody needs a look, and nothing when the history is closed', async () => {
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/me': ME, '/api/trainer/clients': { limit: 5, clients: [ROWS.clients[0], { ...CLIENTS.clients[1], compliance: null }] } }))
+    const host = mount(routes, '/trainer')
+    await flush()
+    expect(host.querySelector('[aria-label="Нужно внимание"]')).toBe(null)
+    expect(host.textContent).toContain('Открыто: замеры и вес')
+  })
+})
+
+describe('TrainerClient: plan compliance', () => {
+  it('shows three tiles with the percent and "выполнено 5 из 6", and the note', async () => {
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/clients/link-aaaa-1/data': { ...DATA(GR), schedule: { days: [1, 3], time: '', remind: false }, compliance: COMP() } }))
+    const host = mount(routes, '/trainer/link-aaaa-1')
+    await flush()
+    const block = host.querySelector('[aria-label="Соблюдение плана"]')
+    expect(block.textContent).toContain('7 дней'); expect(block.textContent).toContain('30 дней'); expect(block.textContent).toContain('90 дней')
+    expect(block.textContent).toContain('83%'); expect(block.textContent).toContain('выполнено 5 из 6')
+    expect(block.textContent).toContain('Считаются дни из расписания, кроме пауз. Сегодня не входит, пока нет тренировки.')
+    expect(block.querySelectorAll('button')).toHaveLength(0)   // a schedule is set: nothing to offer
+  })
+
+  it('without a schedule asks for one and opens the schedule sheet', async () => {
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/clients/link-aaaa-1/data': { ...DATA(GR), schedule: null, compliance: COMP({ hasSchedule: false, d7: WIN(0, 0, 2), d30: WIN(0, 0, 6), d90: WIN(0, 0, 9) }) } }))
+    const host = mount(routes, '/trainer/link-aaaa-1')
+    await flush()
+    const block = host.querySelector('[aria-label="Соблюдение плана"]')
+    expect(block.textContent).toContain('Задайте расписание, чтобы видеть соблюдение плана')
+    expect(block.textContent).toContain('6 трен.')
+    click([...block.querySelectorAll('button')].find(b => b.textContent === 'Задать расписание'))
+    expect(useUI.getState().sheets.length).toBe(1)
+  })
+
+  it('shows nothing when the history is closed', async () => {
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/clients/link-aaaa-1/data': { ...DATA({ history: false, measures: true, stats: false }), compliance: null } }))
+    const host = mount(routes, '/trainer/link-aaaa-1')
+    await flush()
+    expect(host.querySelector('[aria-label="Соблюдение плана"]')).toBe(null)
+  })
+})
+
 describe('TrainerClient', () => {
   it('shows only the sections the client opened', async () => {
     mocks.api.mockImplementation(apiFor({ '/api/trainer/clients/link-aaaa-1/data': DATA({ history: true, measures: false, stats: false }) }))

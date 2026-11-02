@@ -1,11 +1,12 @@
 // The trainer's cabinet, stage 1 (TG14): the clients, and the way to invite one. Read only: nothing here
 // writes to a client. Russian only, like the other Telegram-only screens.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
-import { trainerApi, errorText, grantsText, daysSince, ago, scheduleText, clientsOn, weekPlan, isoWeekday, pauseText, pausedOnWeekday, archivedText } from '../lib/trainer.js'
+import { trainerApi, errorText, grantsText, daysSince, ago, scheduleText, clientsOn, weekPlan, isoWeekday, pauseText, pausedOnWeekday, archivedText, rowCompliance, attentionItems, sortByAttention } from '../lib/trainer.js'
 import { exportFile, saveFile } from '../lib/trainer-managed.js'
 import { scheduleSheet } from '../components/TrainerSchedule.jsx'
+import { AttentionCard } from '../components/TrainerCompliance.jsx'
 import { sendLink, copyLink } from '../lib/plan-link.js'
 import { takeManagedNotice } from '../lib/managed-mode.js'
 import { openManagedDiary, openReadonlyDiary } from '../components/ManagedBar.jsx'
@@ -47,6 +48,9 @@ export default function TrainerHome() {
   useEffect(() => { load() }, [load])
   // Sent back from a client's diary that could not be opened (managed-mode.js): said once.
   useEffect(() => { const n = takeManagedNotice(); if (n) toast(n) }, [])
+
+  const attention = useMemo(() => attentionItems(clients), [clients])
+  const ordered = useMemo(() => sortByAttention(clients), [clients])   // who needs a look goes first
 
   if (me && !me.trainer.enabled) return <Navigate to="/settings" replace />
 
@@ -113,6 +117,7 @@ export default function TrainerHome() {
     {error && <div role="alert" className="small" style={{ color: 'var(--red)', margin: '0 0 12px', lineHeight: 1.4 }}>{error}</div>}
 
     {clients && clients.length > 0 && <>
+      <AttentionCard items={attention} onOpen={c => openClient(c, nav)} />
       <div className="card" style={{ marginBottom: 12 }} aria-label="Сегодня">
         <div className="tt" style={{ marginBottom: 6 }}>Сегодня</div>
         {today.length
@@ -131,14 +136,16 @@ export default function TrainerHome() {
     </>}
 
     {clients && (clients.length
-      ? <div className="list">{clients.map(c => <div key={c.linkId} className="item" role="button" tabIndex={0} style={c.pause ? { opacity: 0.6 } : undefined}
+      ? <div className="list">{ordered.map(c => { const rc = rowCompliance(c); return <div key={c.linkId} className="item" role="button" tabIndex={0} style={c.pause ? { opacity: 0.6 } : undefined}
         onClick={() => openClient(c, nav)} onKeyDown={e => { if (e.key === 'Enter') openClient(c, nav) }}>
         {/* The client's Telegram picture, else the initial on a grey disc; a client without Telegram has the initial only. */}
         <ProfileAvatar user={{ id: c.linkId, name: c.name, avatarUrl: c.avatarUrl }} size={38} neutral />
         <div className="grow"><div className="tt">{c.name}</div>
-          <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div>
+          <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + (rc ? rc.seen : c.workouts === undefined ? 'Открыто: ' + grantsText(c.grants) : `${c.workouts} трен. · ${ago(daysSince(c.lastWorkout))}`)}</div>
+          {rc && rc.note && <div className="ss">{rc.note}</div>}
           {c.pause && <div className="ss">{pauseText(c.pause)}</div>}
           {scheduleText(c.schedule) && <div className="ss">{scheduleText(c.schedule)}</div>}</div>
+        {rc && rc.pct && <span className="tt" aria-label={rc.aria} title="Соблюдение плана за 30 дней" style={{ color: rc.color, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>{rc.pct}</span>}
         <button className="iconbtn" aria-label={'Расписание: ' + c.name} title="Расписание"
           onClick={e => { e.stopPropagation(); scheduleSheet({ linkId: c.linkId, name: c.name, schedule: c.schedule, onSaved: sc => setSchedule(c.linkId, sc) }) }} onKeyDown={e => e.stopPropagation()}><Icon name="calendar" /></button>
         {c.managed && <button className="iconbtn" aria-label={'Данные подопечного: ' + c.name} title="Данные, скачать, удалить"
@@ -146,7 +153,7 @@ export default function TrainerHome() {
         {!c.managed && <button className="iconbtn" aria-label={'Классический вид: ' + c.name} title="Классический вид и настройки"
           onClick={e => { e.stopPropagation(); nav('/trainer/' + c.linkId) }} onKeyDown={e => e.stopPropagation()}><Icon name="gear" /></button>}
         <Icon name="chevronRight" className="chev" />
-      </div>)}</div>
+      </div> })}</div>
       : <div className="empty"><div className="ico"><Icon name="personCircle" /></div>Подопечных пока нет. Пригласите первого по ссылке.</div>)}
 
     <div style={{ height: 12 }} />
