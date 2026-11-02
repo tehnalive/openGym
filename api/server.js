@@ -2458,7 +2458,7 @@ function telegramClientTarget(req, res, user) {
 // here too, so a client document is only ever changed by one set of revision, stamp and conflict rules.
 // readState and atomicWrite are synchronous with nothing awaited between them, so the compare-and-write
 // is atomic for this process.
-function commitState(user, body, { coachUid = null } = {}) {
+function commitState(user, body, { coachUid = null, ops = false } = {}) {
   const cur = readStateStrict(user.id);
   if (cur === UNREADABLE) { console.error('state file unreadable for', user.id); return { status: 503, body: { error: 'state unreadable' } }; }
   const curRev = cur?._rev || 0;
@@ -2474,7 +2474,9 @@ function commitState(user, body, { coachUid = null } = {}) {
   delete body.state.active;              // in-progress workouts stay device-local
   // «Written by the trainer» is the server's mark on a workout, never the writer's (trainer-managed.js applyCoachMarks):
   // set for the trainer's writes, kept as stored for everyone, not addable by a person's own PUT.
-  applyCoachMarks(cur, body.state, { coachUid, stamped: body.stamped === true });
+  // A mark the writer did not send (or sent wrongly) is a document it has not read: one revision further, as below.
+  const markReport = {};
+  applyCoachMarks(cur, body.state, { coachUid, stamped: body.stamped === true, report: markReport });
   // "Reset everything" stamps the profile (`resetAt`, with `resetIds`: what it wiped). The stamp
   // only moves forward: a write without it, or with an older one — a client from before it, a
   // backup restored over the profile — keeps the stored stamp. Otherwise every device that saw
@@ -2499,7 +2501,7 @@ function commitState(user, body, { coachUid = null } = {}) {
   // something it left out or set back (sync-stamps.js), the document stored is not that one: it
   // goes in one revision further, so the writer's next check of the revision (every half minute)
   // finds it moved and reads it, and its next push over the one it was told is a conflict to merge.
-  if (report.changed) body.state._rev = curRev + 2;
+  if (report.changed || (!ops && markReport.changed)) body.state._rev = curRev + 2;
   body.state._wids = [...(Array.isArray(cur?._wids) ? cur._wids : []), ...(cur?._wid ? [cur._wid] : [])]
     .filter(x => typeof x === 'string').slice(-WID_KEEP);
   body.state._wid = crypto.randomBytes(8).toString('hex');
@@ -2989,7 +2991,7 @@ const routes = {
     const applied = applyOps(cur || {}, body.ops, Date.now());
     if (applied.error) return trainerFail(res, 400, applied.error, applied.text);
     applied.doc._ts = Math.max(Date.now(), (Number(cur?._ts) || 0) + 1);
-    const out = commitState(t.client, { state: applied.doc, baseRev: rev, baseWid: cur?._wid }, { coachUid: user.id });
+    const out = commitState(t.client, { state: applied.doc, baseRev: rev, baseWid: cur?._wid }, { coachUid: user.id, ops: true });
     if (out.status !== 200) return trainerFail(res, out.status, out.body.error === 'conflict' ? 'conflict' : 'write-failed', 'Не удалось записать, попробуйте ещё раз');
     audit(req, 'trainer.managed.write', { user, target: t.client, msg: [...new Set(applied.changes)].join(',') });
     json(res, 200, { ok: true, rev: out.body.rev, data: managedView(readStateStrict(t.client.id) || {}) });
@@ -3032,6 +3034,8 @@ const routes = {
     if (bad) return json(res, 400, bad);
     body.state = managedStateIn(body.state);
     const out = commitState(t.client, body, { coachUid: user.id });
+    // The document of the conflict goes the way a read does: no profile id, no personal keys.
+    if (out.status === 409 && out.body.state) out.body.state = managedStateOut(out.body.state);
     if (out.status === 200) audit(req, 'trainer.managed.write', { user, target: t.client, msg: 'document' });
     json(res, out.status, out.body);
   },

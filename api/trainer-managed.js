@@ -105,8 +105,7 @@ function cleanWorkout(raw, now) {
   for (const k of ['start', 'end']) if (w[k] != null && !num(w[k], 0, 8.64e15)) return { error: 'workout-invalid', text: 'Время тренировки неверно' };
   if (w.name != null) w.name = plainText(w.name, 80);
   if (w.note != null) w.note = plainText(w.note, 500);
-  w.via = 'coach';
-  w._ts = now;
+  w._ts = now;   // the mark `via`/`by` is set by applyCoachMarks, in commitState
   return { workout: w };
 }
 
@@ -131,21 +130,24 @@ const markOf = w => (isRec(w) && w.via === COACH_VIA ? { via: COACH_VIA, ...(typ
  *    diary and imported again); `by` is only kept next to it. The mark is a label, it grants nothing.
  * `stamped`: the writer stamps its own fields (`_f`), so a mark given to a changed workout is stamped like an edit.
  */
-export function applyCoachMarks(cur, next, { coachUid = null, stamped = false, now = Date.now() } = {}) {
+export function applyCoachMarks(cur, next, { coachUid = null, stamped = false, now = Date.now(), report = null } = {}) {
   if (!isRec(next) || !Array.isArray(next.workouts)) return next;
-  const stored = new Map(list(cur?.workouts).filter(x => isRec(x) && x.id != null).map(x => [String(x.id), x]));
+  // A workout without an id is known by its day and start (`key`), as applyOps files it.
+  const stored = new Map(list(cur?.workouts).filter(isRec).map(x => [String(key(x)), x]));
   for (const w of next.workouts) {
-    if (!isRec(w) || w.id == null) continue;
-    const old = stored.get(String(w.id));
-    const had = markOf(old), sent = markOf(w);
+    if (!isRec(w)) continue;
+    const old = stored.get(String(key(w)));
+    const had = markOf(old), sent = markOf(w), sentVia = w.via;
     delete w.via; delete w.by;
     if (had) Object.assign(w, had);
     else if (coachUid) {
       if (!old || !sameContent(old, w)) {
         w.via = COACH_VIA; w.by = String(coachUid);
-        if (old && stamped) w._f = { ...(isRec(w._f) ? w._f : {}), via: Math.max(Number(w._ts) || 0, now) };
+        if (old && stamped) { const at = Math.max(Number(w._ts) || 0, now); w._f = { ...(isRec(w._f) ? w._f : {}), via: at, by: at }; }
       }
-    } else if (!old && sent) Object.assign(w, sent);
+    } else if (!old && sent) w.via = COACH_VIA;   // `by` is the trainer's and stays on the server
+    // What the writer sent differs from what the server holds: it has to read the document again.
+    if (report && sentVia !== w.via) report.changed = true;
   }
   return next;
 }
