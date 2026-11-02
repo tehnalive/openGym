@@ -2588,4 +2588,5 @@ export default {
   'Just for this phone. Some home screens take a moment to catch up.': 'Solo para este móvil. Algunas pantallas de inicio tardan un momento en enterarse.',
   'The icon could not be changed.': 'No se pudo cambiar el icono.',
   'Try the Halloween app icon': 'Prueba el icono de Halloween',
+  'Written by the trainer': 'Registrado por el entrenador',
 }

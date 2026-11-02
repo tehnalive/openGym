@@ -14,6 +14,7 @@ import { t } from '../lib/i18n.js'
 import { Segmented } from '../components/ui.jsx'
 import LineChart from '../components/LineChart.jsx'
 import Icon from '../components/Icon.jsx'
+import CoachMark from '../components/CoachMark.jsx'
 import { confirmSheet } from '../sheets.jsx'
 import ProfileAvatar from '../components/ProfileAvatar.jsx'
 
@@ -27,6 +28,7 @@ export function WorkoutCard({ row, unit, onDelete }) {
       onClick={() => setOpen(o => !o)} onKeyDown={e => { if (e.key === 'Enter') setOpen(o => !o) }}>
       <div className="grow"><div className="tt">{row.name}</div>
         <div className="ss">{[fmtDate(row.d, true), row.minutes ? row.minutes + ' мин' : null, `подходов: ${row.sets}`].filter(Boolean).join(' · ')}</div></div>
+      <CoachMark w={row.w} text="Записал тренер" />
       <Icon name={open ? 'chevronLeft' : 'chevronRight'} className="chev" />
     </div>
     {open && <div style={{ marginTop: 8 }}>

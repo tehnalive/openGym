@@ -33,7 +33,7 @@ import {
   trimForTrainer, summaryOf, LABEL_MAX
 } from './trainer.js';
 import {
-  isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId,
+  isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId, applyCoachMarks,
 } from './trainer-managed.js';
 import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS,
@@ -2446,7 +2446,7 @@ function telegramClientTarget(req, res, user) {
 // here too, so a client document is only ever changed by one set of revision, stamp and conflict rules.
 // readState and atomicWrite are synchronous with nothing awaited between them, so the compare-and-write
 // is atomic for this process.
-function commitState(user, body) {
+function commitState(user, body, { coachUid = null } = {}) {
   const cur = readStateStrict(user.id);
   if (cur === UNREADABLE) { console.error('state file unreadable for', user.id); return { status: 503, body: { error: 'state unreadable' } }; }
   const curRev = cur?._rev || 0;
@@ -2460,6 +2460,9 @@ function commitState(user, body) {
     return { status: 409, body: { error: 'conflict', rev: curRev, state: forClient(cur) } };
   }
   delete body.state.active;              // in-progress workouts stay device-local
+  // «Written by the trainer» is the server's mark on a workout, never the writer's (trainer-managed.js applyCoachMarks):
+  // set for the trainer's writes, kept as stored for everyone, not addable by a person's own PUT.
+  applyCoachMarks(cur, body.state, { coachUid, stamped: body.stamped === true });
   // "Reset everything" stamps the profile (`resetAt`, with `resetIds`: what it wiped). The stamp
   // only moves forward: a write without it, or with an older one — a client from before it, a
   // backup restored over the profile — keeps the stored stamp. Otherwise every device that saw
@@ -2873,7 +2876,7 @@ const routes = {
     const applied = applyOps(cur || {}, body.ops, Date.now());
     if (applied.error) return trainerFail(res, 400, applied.error, applied.text);
     applied.doc._ts = Math.max(Date.now(), (Number(cur?._ts) || 0) + 1);
-    const out = commitState(t.client, { state: applied.doc, baseRev: rev, baseWid: cur?._wid });
+    const out = commitState(t.client, { state: applied.doc, baseRev: rev, baseWid: cur?._wid }, { coachUid: user.id });
     if (out.status !== 200) return trainerFail(res, out.status, out.body.error === 'conflict' ? 'conflict' : 'write-failed', 'Не удалось записать, попробуйте ещё раз');
     audit(req, 'trainer.managed.write', { user, target: t.client, msg: [...new Set(applied.changes)].join(',') });
     json(res, 200, { ok: true, rev: out.body.rev, data: managedView(readStateStrict(t.client.id) || {}) });
@@ -2915,7 +2918,7 @@ const routes = {
     const bad = stateBodyError(body);
     if (bad) return json(res, 400, bad);
     body.state = managedStateIn(body.state);
-    const out = commitState(t.client, body);
+    const out = commitState(t.client, body, { coachUid: user.id });
     if (out.status === 200) audit(req, 'trainer.managed.write', { user, target: t.client, msg: 'document' });
     json(res, out.status, out.body);
   },

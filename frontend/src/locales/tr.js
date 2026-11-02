@@ -2588,4 +2588,5 @@ export default {
   'Just for this phone. Some home screens take a moment to catch up.': 'Yalnızca bu telefon için. Bazı ana ekranların fark etmesi biraz sürer.',
   'The icon could not be changed.': 'Simge değiştirilemedi.',
   'Try the Halloween app icon': 'Cadılar Bayramı uygulama simgesini dene',
+  'Written by the trainer': 'Antrenör kaydetti',
 }
