@@ -33,8 +33,12 @@ import {
   trimForTrainer, summaryOf, LABEL_MAX
 } from './trainer.js';
 import {
-  isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId, applyCoachMarks,
+  isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId, applyCoachMarks, DOC_BYTES_MAX,
 } from './trainer-managed.js';
+import {
+  TEMPLATES_MAX, ASSIGN_MAX, buildTemplate, changeTemplate, cleanContent, summaryOf as templateSummary, addToDoc, buildOffer, pushOffer, offerView,
+  readTemplates, writeTemplates, removeTemplates,
+} from './trainer-templates.js';
 import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS,
   transportsOf,
@@ -1616,6 +1620,7 @@ function removeAccount(u) {
   presence.delete(u.id);
   // The training history and any Coach credential of theirs, both outside db.json.
   try { fs.unlinkSync(stateFile(u.id)); } catch { /* already gone */ }
+  removeTemplates(DATA, u.id);              // a trainer's templates (trainer-templates.js)
   try { coachConfig.clearProfileAuth(u.id); } catch { /* nothing stored */ }
   // Their photos and videos — the one place a profile's folder under uploads/ is removed.
   try { MEDIA.removeUser(u.id); } catch (e) { console.error('media: could not remove uploads of', u.id, e.message); }
@@ -2254,14 +2259,21 @@ function trainerCaller(req, res) {
 // a revoked and an unknown id all read the same: not there.
 function managedTarget(req, res, user) {
   if (!isTrainer(user)) { trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках'); return null; }
-  const link = ID_RE.test(req.trainerId || '') ? managedLinkFor(db, user.id, req.trainerId) : null;
-  const client = link && db.users.find(u => u.id === link.clientUid && u.managedBy === user.id);
-  if (!client || client.disabled) {
+  const found = managedClientOf(user, req.trainerId);
+  if (!found) {
     audit(req, 'trainer.denied', { ok: false, user, msg: 'no-managed-link' });
     trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
     return null;
   }
-  return { link, client };
+  return found;
+}
+// The rule behind managedTarget, for a route that works on several clients (templates, section 17): the managed client
+// of this trainer's active link `id`, or null.
+function managedClientOf(user, id) {
+  if (!isTrainer(user)) return null;
+  const link = ID_RE.test(id || '') ? managedLinkFor(db, user.id, id) : null;
+  const client = link && db.users.find(u => u.id === link.clientUid && u.managedBy === user.id);
+  return client && !client.disabled ? { link, client } : null;
 }
 // The invite a token stands for, as seen by `user` who is about to open or accept it. A refusal is
 // { fail: { code, args } } with args ready for trainerFail; the wording never tells a stranger anything
@@ -2515,6 +2527,84 @@ function commitState(user, body, { coachUid = null } = {}) {
   return { status: 200, body: { ok: true, ts: body.state._ts || null, rev: curRev + 1, wid: body.state._wid } };
 }
 
+// ---- trainer templates and copying routines (TG14, docs/telegram/TRAINER_MODE.md section 17) ----
+// A template is the trainer's own file (trainer-templates.js); handing it to a client makes an independent copy:
+//  - a client without Telegram: written into the diary through commitState, like every write of the trainer to a managed
+//    diary, after the managed client of this trainer's link has been resolved (managedClientOf);
+//  - a client who signed in with Telegram: nothing of their document is written. The offer is put on the link and the
+//    client's own app adds it with its own PUT /api/data.
+function templateCaller(req, res, window) {
+  const user = trainerCaller(req, res);
+  if (!user) return null;
+  if (!isTrainer(user)) { trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках'); return null; }
+  const wait = window.take(user.id);
+  if (wait) { tooMany(res, wait); return null; }
+  return user;
+}
+// The trainer's templates, or null after the 503 when the file cannot be read (it is then left alone).
+function templatesOr503(res, user) {
+  const all = readTemplates(DATA, user.id);
+  if (!all) trainerFail(res, 503, 'unreadable', 'Шаблоны сейчас не читаются, попробуйте позже');
+  return all;
+}
+// One client's share of an assignment: { linkId, result: 'added' | 'offered' | 'error', code? }.
+function deliverToLink(req, user, linkId, content, { templateId = '', templateName = '', via = 'assign' } = {}) {
+  const fail = code => ({ linkId, result: 'error', code });
+  const link = typeof linkId === 'string' && ID_RE.test(linkId)
+    ? db.trainerLinks.find(l => l.id === linkId && l.coachUid === user.id && l.status === 'active') : null;
+  const client = link && db.users.find(u => u.id === link.clientUid);
+  if (!link || !client || client.disabled) return fail('client-gone');
+  if (link.managed) {
+    const t = managedClientOf(user, linkId);
+    if (!t) return fail('client-gone');
+    const cur = readStateStrict(t.client.id);
+    if (cur === UNREADABLE) return fail('unreadable');
+    const added = addToDoc(cur || {}, content, { templateId });
+    if (JSON.stringify(added.doc).length > DOC_BYTES_MAX) return fail('doc-too-big');
+    added.doc._ts = Math.max(Date.now(), (Number(cur?._ts) || 0) + 1);
+    const out = commitState(t.client, { state: added.doc, baseRev: cur?._rev || 0, baseWid: cur?._wid }, { coachUid: user.id });
+    if (out.status !== 200) return fail('write-failed');
+    audit(req, 'trainer.template.assign', { user, target: t.client, msg: via + ':added' });
+    return { linkId, result: 'added', routineCount: added.routineIds.length };
+  }
+  const made = buildOffer(content, { templateId, templateName });
+  if (made.error) return fail(made.error);
+  const before = link.offers;
+  link.offers = pushOffer(before, made.offer);
+  try { saveDb(); } catch (error) { link.offers = before; console.error('trainer offer was not saved', error.message); return fail('write-failed'); }
+  audit(req, 'trainer.template.assign', { user, target: client, msg: via + ':offered' });
+  return { linkId, result: 'offered' };
+}
+// The links of a body's `linkIds` (or `toLinkIds`): a list of ids, without repeats, at most ASSIGN_MAX.
+function linkIdsOf(raw) {
+  if (!Array.isArray(raw) || !raw.length || raw.length > ASSIGN_MAX || !raw.every(x => typeof x === 'string')) return null;
+  return [...new Set(raw)];
+}
+// The routines of a managed client's diary named by `ids`, in that order, with the custom exercises they use; or an error body.
+function routinesOfDiary(client, ids) {
+  const S = readStateStrict(client.id);
+  if (S === UNREADABLE) return { fail: [503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже'] };
+  if (!Array.isArray(ids) || !ids.length || !ids.every(x => typeof x === 'string')) return { fail: [400, 'routines-required', 'Выберите хотя бы одну рутину'] };
+  const have = new Map((Array.isArray(S?.routines) ? S.routines : []).filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(r => [r.id, r]));
+  const picked = [...new Set(ids)].map(id => have.get(id));
+  if (picked.some(r => !r)) return { fail: [404, 'routine-gone', 'Такой рутины в дневнике подопечного нет. Подождите секунду, пока дневник сохранится, и повторите'] };
+  const content = cleanContent({ routines: picked, customEx: Array.isArray(S?.customEx) ? S.customEx : [] });
+  if (content.error) return { fail: [content.status || 400, content.error, content.text] };
+  return { content: { ...content, unit: S?.unit === 'lb' ? 'lb' : 'kg' } };
+}
+
+// The offer `offerId` on the signed-in client's active link, taken off it; { offer, coach } or null.
+function takeOffer(user, offerId) {
+  const link = clientLink(db, user.id);
+  const at = link && ID_RE.test(offerId || '') ? (link.offers || []).findIndex(o => o && o.id === offerId) : -1;
+  if (at < 0) return null;
+  const before = link.offers;
+  const offer = before[at];
+  link.offers = before.filter((_, i) => i !== at);
+  try { saveDb(); } catch (error) { link.offers = before; throw error; }
+  return { offer, coach: db.users.find(u => u.id === link.coachUid) || null };
+}
+
 const routes = {
   // 503 rather than a flag in a 200: the container healthcheck is `wget --spider`, which reads
   // the status and nothing else, and an instance that cannot write its data directory is exactly
@@ -2643,7 +2733,8 @@ const routes = {
         invites: db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open')
           .map(i => ({ id: i.id, label: i.label || '', created: i.created, expires: i.expires }))
       } : { enabled: false, limit: TRAINER_CLIENT_LIMIT },
-      asClient: link && coach ? { linkId: link.id, coachName: displayName(coach), grants: link.grants, consentAt: link.consentAt } : null
+      asClient: link && coach ? { linkId: link.id, coachName: displayName(coach), grants: link.grants, consentAt: link.consentAt,
+        offers: (Array.isArray(link.offers) ? link.offers : []).map(offerView) } : null
     });
   },
   'PUT /api/trainer/me': async (req, res) => {
@@ -2749,6 +2840,28 @@ const routes = {
     try { saveDb(); } catch (error) { db.trainerLinks.pop(); delete found.invite.usedBy; delete found.invite.usedAt; throw error; }
     audit(req, 'trainer.invite.accept', { user, target: found.coach });
     json(res, 200, { ok: true, linkId: link.id, coachName: displayName(found.coach), grants });
+  },
+  // Offers (TG14, section 17): what the trainer handed to a client who signed in with Telegram. The server only keeps and
+  // removes the offer; the client's app adds the routines to its own diary with its own PUT /api/data.
+  'POST /api/trainer/offers/{id}/accept': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const taken = takeOffer(user, req.trainerId);
+    if (!taken) return trainerFail(res, 404, 'offer-gone', 'Предложение не найдено: возможно, оно уже принято или отозвано');
+    audit(req, 'trainer.offer.accept', { user, target: taken.coach });
+    json(res, 200, { ok: true, offer: offerView(taken.offer) });
+  },
+  'POST /api/trainer/offers/{id}/decline': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const taken = takeOffer(user, req.trainerId);
+    if (!taken) return trainerFail(res, 404, 'offer-gone', 'Предложение не найдено: возможно, оно уже принято или отозвано');
+    audit(req, 'trainer.offer.decline', { user, target: taken.coach });
+    json(res, 200, { ok: true });
   },
   'GET /api/trainer/clients': async (req, res) => {
     const user = trainerCaller(req, res);
@@ -2946,6 +3059,117 @@ const routes = {
     trainerReadNoted.delete(t.link.id);
     audit(req, 'trainer.managed.delete', { user, target: t.client });
     json(res, 200, { ok: true });
+  },
+  // Templates (TG14, section 17). Only the trainer's own; the content of a template never appears in the audit log.
+  'GET /api/trainer/templates': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_READS);
+    if (!user) return;
+    const all = templatesOr503(res, user);
+    if (!all) return;
+    json(res, 200, { templates: all.map(templateSummary), limit: TEMPLATES_MAX });
+  },
+  'POST /api/trainer/templates': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_WRITES);
+    if (!user) return;
+    const body = await readBody(req);
+    const all = templatesOr503(res, user);
+    if (!all) return;
+    if (all.length >= TEMPLATES_MAX) return trainerFail(res, 409, 'templates-limit', `Можно хранить до ${TEMPLATES_MAX} шаблонов`, { limit: TEMPLATES_MAX });
+    const made = buildTemplate(body);
+    if (made.error) return trainerFail(res, made.status, made.error, made.text);
+    writeTemplates(DATA, user.id, [...all, made.template]);
+    audit(req, 'trainer.template.create', { user });
+    json(res, 200, { ok: true, template: made.template });
+  },
+  // A template out of the routines of a client without Telegram. A Telegram client's routines are not given to the trainer.
+  'POST /api/trainer/templates/from-client/{id}': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_WRITES);
+    if (!user) return;
+    const body = await readBody(req);
+    const t = managedClientOf(user, req.trainerId);
+    if (!t) {
+      if (ID_RE.test(req.trainerId || '') && db.trainerLinks.some(l => l.id === req.trainerId && l.coachUid === user.id && l.status === 'active' && !l.managed)) {
+        return trainerFail(res, 403, 'client-private', 'У подопечного через Telegram рутины тренеру недоступны: он может прислать их сам');
+      }
+      audit(req, 'trainer.denied', { ok: false, user, msg: 'no-managed-link' });
+      return trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
+    }
+    const all = templatesOr503(res, user);
+    if (!all) return;
+    if (all.length >= TEMPLATES_MAX) return trainerFail(res, 409, 'templates-limit', `Можно хранить до ${TEMPLATES_MAX} шаблонов`, { limit: TEMPLATES_MAX });
+    const got = routinesOfDiary(t.client, body && body.routineIds);
+    if (got.fail) return trainerFail(res, ...got.fail);
+    const made = buildTemplate({ name: body.name, note: body.note, ...got.content });
+    if (made.error) return trainerFail(res, made.status, made.error, made.text);
+    writeTemplates(DATA, user.id, [...all, made.template]);
+    audit(req, 'trainer.template.create', { user, target: t.client, msg: 'from-client' });
+    json(res, 200, { ok: true, template: made.template });
+  },
+  'GET /api/trainer/templates/{id}': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_READS);
+    if (!user) return;
+    const all = templatesOr503(res, user);
+    if (!all) return;
+    const found = all.find(x => x.id === req.trainerId);
+    if (!found) return trainerFail(res, 404, 'template-gone', 'Шаблон не найден');
+    json(res, 200, { template: found });
+  },
+  'PUT /api/trainer/templates/{id}': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_WRITES);
+    if (!user) return;
+    const body = await readBody(req);
+    const all = templatesOr503(res, user);
+    if (!all) return;
+    const at = all.findIndex(x => x.id === req.trainerId);
+    if (at < 0) return trainerFail(res, 404, 'template-gone', 'Шаблон не найден');
+    const made = changeTemplate(all[at], body);
+    if (made.error) return trainerFail(res, made.status, made.error, made.text);
+    const next = all.slice(); next[at] = made.template;
+    writeTemplates(DATA, user.id, next);
+    audit(req, 'trainer.template.update', { user });
+    json(res, 200, { ok: true, template: made.template });
+  },
+  'DELETE /api/trainer/templates/{id}': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_WRITES);
+    if (!user) return;
+    const all = templatesOr503(res, user);
+    if (!all) return;
+    if (!all.some(x => x.id === req.trainerId)) return trainerFail(res, 404, 'template-gone', 'Шаблон не найден');
+    writeTemplates(DATA, user.id, all.filter(x => x.id !== req.trainerId));
+    audit(req, 'trainer.template.delete', { user });
+    json(res, 200, { ok: true });
+  },
+  // Hand a template to clients: a copy into the diary of one without Telegram, an offer to one with Telegram.
+  'POST /api/trainer/templates/{id}/assign': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_WRITES);
+    if (!user) return;
+    const body = await readBody(req);
+    const ids = linkIdsOf(body && body.linkIds);
+    if (!ids) return trainerFail(res, 400, 'links-required', `Выберите подопечных (не больше ${ASSIGN_MAX})`);
+    const all = templatesOr503(res, user);
+    if (!all) return;
+    const template = all.find(x => x.id === req.trainerId);
+    if (!template) return trainerFail(res, 404, 'template-gone', 'Шаблон не найден');
+    const results = ids.map(linkId => deliverToLink(req, user, linkId, template, { templateId: template.id, templateName: template.name }));
+    json(res, 200, { ok: true, results });
+  },
+  // The same from one client without Telegram to others: the routines are read from the source diary, then handed over as a template would be.
+  'POST /api/trainer/managed/{id}/routines/copy': async (req, res) => {
+    const user = templateCaller(req, res, TRAINER_WRITES);
+    if (!user) return;
+    const body = await readBody(req);
+    const t = managedTarget(req, res, user);
+    if (!t) return;
+    const ids = linkIdsOf(body && body.toLinkIds);
+    if (!ids) return trainerFail(res, 400, 'links-required', `Выберите подопечных (не больше ${ASSIGN_MAX})`);
+    const got = routinesOfDiary(t.client, body.routineIds);
+    if (got.fail) return trainerFail(res, ...got.fail);
+    const names = got.content.routines.map(r => r.name);
+    const templateName = (names.length > 1 ? `${names[0]} и ещё ${names.length - 1}` : names[0]).slice(0, 60);
+    const results = ids.map(linkId => (linkId === t.link.id
+      ? { linkId, result: 'error', code: 'same-client' }
+      : deliverToLink(req, user, linkId, got.content, { templateName, via: 'copy' })));
+    json(res, 200, { ok: true, results });
   },
   // Which days this client comes, at what time, and whether to remind the trainer that morning. The trainer's own.
   'PUT /api/trainer/links/{id}/schedule': async (req, res) => {
@@ -3849,8 +4073,15 @@ const server = http.createServer(async (req, res) => {
   if (td) { key = req.method + ' /api/trainer/clients/{id}/' + td[2]; req.trainerId = td[1]; }
   const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);
   if (tc) { key = req.method + ' /api/trainer/clients/{id}/data'; req.trainerId = tc[1]; }
-  const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export|data|data\/rev))?$/.exec(url.pathname);
+  const tg = /^\/api\/trainer\/managed\/([^/]+)(?:\/(ops|export|data|data\/rev|routines\/copy))?$/.exec(url.pathname);
   if (tg) { key = req.method + ' /api/trainer/managed/{id}' + (tg[2] ? '/' + tg[2] : ''); req.trainerId = tg[1]; }
+  // Templates and offers (TG14, section 17): the id in the path is a template, a link or an offer.
+  const tf = /^\/api\/trainer\/templates\/from-client\/([^/]+)$/.exec(url.pathname);
+  const tt = !tf && /^\/api\/trainer\/templates\/([^/]+)(?:\/(assign))?$/.exec(url.pathname);
+  if (tf) { key = req.method + ' /api/trainer/templates/from-client/{id}'; req.trainerId = tf[1]; }
+  else if (tt) { key = req.method + ' /api/trainer/templates/{id}' + (tt[2] ? '/' + tt[2] : ''); req.trainerId = tt[1]; }
+  const to = /^\/api\/trainer\/offers\/([^/]+)\/(accept|decline)$/.exec(url.pathname);
+  if (to) { key = req.method + ' /api/trainer/offers/{id}/' + to[2]; req.trainerId = to[1]; }
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: 'not found' });
   if (TELEGRAM_ONLY && TELEGRAM_ONLY_REFUSED.has(key)) return json(res, 403, { error: 'sign-in is only through Telegram', code: 'telegram-only' });

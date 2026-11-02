@@ -95,6 +95,12 @@ const LABELS = {
   'trainer.managed.export': "Trainer exported a managed client's diary",
   'trainer.managed.delete': 'Deleted a managed client',
   'trainer.managed.fail': 'Adding a managed client was refused',
+  'trainer.template.create': 'Trainer saved a template of routines',
+  'trainer.template.update': 'Trainer changed a template',
+  'trainer.template.delete': 'Trainer deleted a template',
+  'trainer.template.assign': 'Trainer handed routines to a client',
+  'trainer.offer.accept': 'Accepted a program from the trainer',
+  'trainer.offer.decline': 'Declined a program from the trainer',
   'trainer.denied': "Trainer blocked from a client's data"
 }
 // An unknown event is shown raw rather than dropped or rendered as "undefined": a dashboard
@@ -142,6 +148,12 @@ const REASONS = {
   'no-managed-link': 'no managed client of the trainer with that id',
   // What a `trainer.managed.write` changed: the diary saved by the app opened in the client's name (the older operations name their kind).
   'document': 'the diary was saved from the app opened in the name of the client',
+  // What a `trainer.template.create` or `trainer.template.assign` did (`assign` from a template, `copy` from another client).
+  'from-client': 'the template was made from a client without Telegram',
+  'assign:added': 'copied into the diary of a client without Telegram',
+  'assign:offered': 'offered to a client who signed in with Telegram',
+  'copy:added': 'routines of another client copied into the diary of a client without Telegram',
+  'copy:offered': 'routines of another client offered to a client who signed in with Telegram',
   // What a `media.throttled` pause was for.
   'upload': 'photo and video uploads',
   'sweep': 'clearing unused photos and videos'
