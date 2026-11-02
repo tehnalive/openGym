@@ -3504,7 +3504,8 @@ paths:
                     properties:
                       enabled: { type: boolean }
                       limit: { type: integer, description: 'Active clients a trainer may have (5).' }
-                      clients: { type: integer }
+                      clients: { type: integer, description: 'Active clients (the ones that take a place).' }
+                      archived: { type: integer, description: 'Archived clients (they take no place).' }
                       since: { type: string, format: date-time, nullable: true }
                       invites: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string }, created: { type: string }, expires: { type: string } } } }
                   asClient:
@@ -3515,6 +3516,17 @@ paths:
                       coachName: { type: string }
                       grants: { $ref: '#/components/schemas/TrainerGrants' }
                       consentAt: { type: string, format: date-time }
+                      status:
+                        type: string
+                        enum: [active, archived]
+                        description: 'An archived link still stands: the trainer cannot read anything, and no other trainer can take the client until the client ends it.'
+                      pause:
+                        type: object
+                        description: 'Only while the trainer has the client on pause.'
+                        properties:
+                          since: { type: string, format: date-time }
+                          until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
+                          reason: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: 'Not a Telegram profile (`code: telegram-required`).'
@@ -3525,8 +3537,8 @@ paths:
       description: |
         `{ enabled: true, ageConfirmed: true }` turns it on; without `ageConfirmed: true` the answer is
         `400 age-required`, and the time of the confirmation is stored. `{ enabled: false }` turns it
-        off, revokes the open invitations, and is refused with `409 has-clients` while a client link is
-        active.
+        off, revokes the open invitations, ends the archived clients with Telegram, and is refused with
+        `409 has-clients` while a client link is active or a client without Telegram is in the archive.
       requestBody:
         required: true
         content:
@@ -3723,7 +3735,10 @@ paths:
       tags: [data]
       operationId: listTrainerClients
       summary: My clients
-      description: The calling trainer's active clients with a one-line summary of what they opened. Names are display names; no ids but the link id.
+      description: |
+        The calling trainer's active clients with a one-line summary of what they opened (and `pause` while
+        the client is on pause), and the archived ones: names only, no data. Names are display names; no ids
+        but the link id.
       responses:
         '200':
           description: The clients.
@@ -3744,6 +3759,17 @@ paths:
                         grants: { $ref: '#/components/schemas/TrainerGrants' }
                         workouts: { type: integer, description: 'Only with the history or stats grant.' }
                         lastWorkout: { type: string, nullable: true }
+                        pause: { $ref: '#/components/schemas/TrainerPause' }
+                  archived:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        linkId: { type: string }
+                        name: { type: string }
+                        managed: { type: boolean }
+                        archivedAt: { type: string, format: date-time, nullable: true }
+                        avatarUrl: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
@@ -3931,7 +3957,7 @@ paths:
       tags: [data]
       operationId: deleteManagedClient
       summary: Delete a managed client and the diary
-      description: Erases the profile and its diary for good, as deleting an account does. Needs `{ "confirm": true }`.
+      description: Erases the profile and its diary for good, as deleting an account does. Needs `{ "confirm": true }`. Works on an archived client too.
       requestBody:
         required: true
         content:
@@ -4010,7 +4036,7 @@ paths:
       tags: [data]
       operationId: exportManagedClient
       summary: Export a managed client's diary
-      description: The diary as one JSON document the trainer can save and hand to the client.
+      description: The diary as one JSON document the trainer can save and hand to the client. Works on an archived client too.
       responses:
         '200':
           description: The export.
@@ -4166,6 +4192,123 @@ paths:
         '404':
           description: 'Not the caller''s active link (`link-gone`).'
 
+  /api/trainer/links/{id}/pause:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    put:
+      tags: [data]
+      operationId: pauseTrainerClient
+      summary: Put a client on pause
+      description: |
+        The client is on leave or injured: the place and the access stay, the trainer is not reminded, and the
+        days do not count against the client's plan. `until` is the last paused day (today to 365 days ahead) or
+        null for no end; the key must be sent. A pause whose last day has passed is over, read lazily. Sending it
+        again changes the end. The periods are kept on the link (`pauses`, the last 50) for the plan statistics.
+        Only the trainer of an active link; anything else answers `404 link-gone`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [until]
+              properties:
+                until: { type: string, nullable: true, description: 'YYYY-MM-DD or null.' }
+                reason: { type: string, maxLength: 80, description: 'Optional, e.g. "Отпуск" or "Травма".' }
+      responses:
+        '200':
+          description: The pause as stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pause: { $ref: '#/components/schemas/TrainerPause' }
+        '400':
+          description: '`bad-request`, `until-invalid`, `until-past` or `until-far`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s active link (`link-gone`).'
+    delete:
+      tags: [data]
+      operationId: resumeTrainerClient
+      summary: Take a client off pause
+      description: The client is expected again from today. Taking off a pause that is not there is not an error.
+      responses:
+        '200':
+          description: Off pause.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pause: { type: object, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s active link (`link-gone`).'
+
+  /api/trainer/links/{id}/archive:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: archiveTrainerClient
+      summary: Move a client to the archive
+      description: |
+        Frees the place (an archived client is not counted in the limit of five) and closes the trainer's access:
+        every client route answers `404 client-gone` until the client is restored. The client's data is kept. A
+        pause is lifted. A client with Telegram sees the link as archived and can end it; a client without Telegram
+        keeps only the export and the delete. At most 50 archived clients (`409 archive-limit`).
+      responses:
+        '200':
+          description: Archived.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  archivedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s active link (`link-gone`).'
+        '409':
+          description: '`archive-limit`.'
+
+  /api/trainer/links/{id}/restore:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: restoreTrainerClient
+      summary: Bring a client back from the archive
+      description: |
+        Takes a place again, so it needs a free one: with five active clients the answer is `409 client-limit`
+        with the same text as for a new client. The trainer's access is back at once.
+      responses:
+        '200':
+          description: Active again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ok' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s archived link (`link-gone`).'
+        '409':
+          description: '`client-limit`.'
+
   /api/trainer/links/{id}:
     parameters:
       - name: id
@@ -4178,7 +4321,7 @@ paths:
       operationId: endTrainerLink
       summary: End a trainer link
       description: |
-        Either side can, at any time; the trainer loses access at once. The client's data was never copied
+        Either side can, at any time, on an active or an archived link; the trainer loses access at once. The client's data was never copied
         and stays with the client; what the trainer already saw cannot be taken back.
       responses:
         '200':
@@ -4188,7 +4331,7 @@ paths:
               schema: { $ref: '#/components/schemas/Ok' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: 'No active link of the caller with that id (`link-gone`).'
+          description: 'No active or archived link of the caller with that id (`link-gone`).'
 
 components:
   securitySchemes:
@@ -4359,6 +4502,14 @@ components:
       properties:
         ok: { type: boolean, const: true }
 
+    TrainerPause:
+      type: object
+      nullable: true
+      description: 'The pause set on a client while it holds; null when there is none.'
+      properties:
+        since: { type: string, format: date-time }
+        until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
+        reason: { type: string }
     TrainerGrants:
       type: object
       description: What a client opened to the trainer. Photos and the AI coach chat cannot be opened. `stats` needs `history`.

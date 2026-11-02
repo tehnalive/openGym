@@ -29,8 +29,8 @@ import { createBackoff, createWindow } from './rate-limit.js';
 import { SHARE_ID_RE, newShareId, checkBundle, authorName, shareLink, shareExpired } from './shares.js';
 import {
   checkSchedule, reminderDecision, reminderText, TRAINER_CLIENT_LIMIT, CONSENT_VERSION, INVITE_DAYS, INVITE_DEFAULT_DAYS, INVITE_MAX_OPEN, GRANT_KEYS, CLIENT_LIMIT_MESSAGE, TOKEN_RE, ID_RE,
-  newToken, newId, hashToken, inviteLink, displayName, isTrainer, activeLinks, clientLink, inviteState, pruneInvites, checkGrants,
-  trimForTrainer, summaryOf, LABEL_MAX
+  newToken, newId, hashToken, inviteLink, displayName, isTrainer, activeLinks, archivedLinks, currentLink, inviteState, pruneInvites, checkGrants,
+  trimForTrainer, summaryOf, LABEL_MAX, checkPause, startPause, endPause, archiveLink, restoreLink, pauseOf, ARCHIVE_LIMIT
 } from './trainer.js';
 import {
   isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId,
@@ -739,7 +739,7 @@ function trainerRemindersTick() {
     if (!trainer || trainer.disabled || !trainer.telegramId || !isTrainer(trainer) || !trainer.trainer.tz) continue;
     const now = userNow(trainer.trainer.tz);
     if (!now) continue;
-    const what = reminderDecision(link, now);
+    const what = reminderDecision(link, now);   // null while the client is on pause
     if (!what) continue;
     const client = db.users.find(u => u.id === link.clientUid);
     link.lastRemindDate = now.date;
@@ -2250,11 +2250,18 @@ function trainerCaller(req, res) {
   if (!user.telegramId) { trainerFail(res, 403, 'telegram-required', 'Режим тренера доступен только при входе через Telegram'); return null; }
   return user;
 }
+// The trainer's date ('YYYY-MM-DD') in their own time zone (set by the app), the server's UTC date if none is known.
+// Pauses and the archive are counted in these days.
+function trainerToday(user) {
+  const tz = user.trainer && user.trainer.tz;
+  return (tz && userNow(tz)?.date) || new Date().toISOString().slice(0, 10);
+}
 // The managed client behind `req.trainerId`, for its own trainer only. Another trainer's, a Telegram client's,
 // a revoked and an unknown id all read the same: not there.
-function managedTarget(req, res, user) {
+// `statuses` is for the two routes an archived client keeps (the export and the delete).
+function managedTarget(req, res, user, statuses) {
   if (!isTrainer(user)) { trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках'); return null; }
-  const link = ID_RE.test(req.trainerId || '') ? managedLinkFor(db, user.id, req.trainerId) : null;
+  const link = ID_RE.test(req.trainerId || '') ? managedLinkFor(db, user.id, req.trainerId, statuses) : null;
   const client = link && db.users.find(u => u.id === link.clientUid && u.managedBy === user.id);
   if (!client || client.disabled) {
     audit(req, 'trainer.denied', { ok: false, user, msg: 'no-managed-link' });
@@ -2279,7 +2286,8 @@ function trainerInviteFor(token, user) {
   if (state === 'used') return refuse(410, 'invite-used', 'Эта ссылка уже использована');
   if (state === 'expired') return refuse(410, 'invite-expired', 'Срок ссылки истёк, попросите тренера прислать новую');
   if (coach.id === user.id) return refuse(409, 'self-invite', 'Это ваша собственная ссылка');
-  if (clientLink(db, user.id)) return refuse(409, 'has-trainer', 'У вас уже есть тренер. Сначала прекратите прежний доступ в настройках');
+  // An archived link still stands for the client: no other trainer until the client ends it.
+  if (currentLink(db, user.id)) return refuse(409, 'has-trainer', 'У вас уже есть тренер. Сначала прекратите прежний доступ в настройках');
   if (activeLinks(db, coach.id).length >= TRAINER_CLIENT_LIMIT) return refuse(409, 'coach-full', 'У этого тренера сейчас нет свободных мест');
   return { invite, coach };
 }
@@ -2631,16 +2639,18 @@ const routes = {
   'GET /api/trainer/me': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
-    const link = clientLink(db, user.id);
+    // The client's own link stands while it is active or archived; the client sees both (and ends either).
+    const link = currentLink(db, user.id);
     const coach = link && db.users.find(u => u.id === link.coachUid);
     json(res, 200, {
       consentVersion: CONSENT_VERSION,
       trainer: isTrainer(user) ? {
-        enabled: true, since: user.trainer.since || null, limit: TRAINER_CLIENT_LIMIT, clients: activeLinks(db, user.id).length,
+        enabled: true, since: user.trainer.since || null, limit: TRAINER_CLIENT_LIMIT, clients: activeLinks(db, user.id).length, archived: archivedLinks(db, user.id).length,
         invites: db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open')
           .map(i => ({ id: i.id, label: i.label || '', created: i.created, expires: i.expires }))
       } : { enabled: false, limit: TRAINER_CLIENT_LIMIT },
-      asClient: link && coach ? { linkId: link.id, coachName: displayName(coach), grants: link.grants, consentAt: link.consentAt } : null
+      asClient: link && coach ? { linkId: link.id, coachName: displayName(coach), grants: link.grants, consentAt: link.consentAt, status: link.status,
+        ...(link.status === 'active' && pauseOf(link, trainerToday(coach)) ? { pause: pauseOf(link, trainerToday(coach)) } : {}) } : null
     });
   },
   'PUT /api/trainer/me': async (req, res) => {
@@ -2655,13 +2665,20 @@ const routes = {
       user.trainer = { enabled: true, since: before?.since || new Date().toISOString(), ageConfirmedAt: new Date().toISOString() };
     } else {
       if (activeLinks(db, user.id).length) return trainerFail(res, 409, 'has-clients', 'Сначала завершите связь со всеми подопечными');
+      // Archived clients without Telegram keep a diary only this trainer reaches, so they hold the role like active ones.
+      if (archivedLinks(db, user.id).some(l => l.managed)) return trainerFail(res, 409, 'has-clients', 'Сначала удалите подопечных без Telegram из архива');
       if (before) user.trainer = { ...before, enabled: false };
     }
     const invites = db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open');
     if (!body.enabled) invites.forEach(i => { i.revokedAt = new Date().toISOString(); });
+    // The archived Telegram clients end with the role: the client keeps their data and is free to find another trainer.
+    const archived = body.enabled ? [] : archivedLinks(db, user.id);
+    const archivedBefore = archived.map(l => JSON.stringify(l));
+    archived.forEach(l => { l.status = 'revoked'; l.revokedAt = new Date().toISOString(); l.revokedBy = 'coach'; delete l.archivedAt; });
     try { saveDb(); } catch (error) {
       if (before) user.trainer = before; else delete user.trainer;
       invites.forEach(i => { delete i.revokedAt; });
+      archived.forEach((l, i) => { for (const k of Object.keys(l)) delete l[k]; Object.assign(l, JSON.parse(archivedBefore[i])); });
       throw error;
     }
     audit(req, body.enabled ? 'trainer.enable' : 'trainer.disable', { user });
@@ -2751,16 +2768,25 @@ const routes = {
     const user = trainerCaller(req, res);
     if (!user) return;
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const today = trainerToday(user);
     const clients = [];
     for (const link of activeLinks(db, user.id)) {
       const client = db.users.find(u => u.id === link.clientUid);
       if (!client || client.disabled) continue;
       const S = readStateStrict(client.id);
       clients.push({ linkId: link.id, name: displayName(client), since: link.consentAt, grants: link.grants, ...clientAvatar(client, link), schedule: link.schedule || null,
+        pause: pauseOf(link, today),
         ...(link.managed ? { managed: true, note: link.note || '' } : {}),
         ...(S && S !== UNREADABLE ? summaryOf(S, link.grants) : {}) });
     }
-    json(res, 200, { clients, limit: TRAINER_CLIENT_LIMIT });
+    // The archive: names only, no data (the trainer's access is closed until the client is restored).
+    const archived = [];
+    for (const link of archivedLinks(db, user.id)) {
+      const client = db.users.find(u => u.id === link.clientUid);
+      if (!client || client.disabled) continue;
+      archived.push({ linkId: link.id, name: displayName(client), managed: link.managed === true, archivedAt: link.archivedAt || null, ...clientAvatar(client, link) });
+    }
+    json(res, 200, { clients, archived, limit: TRAINER_CLIENT_LIMIT });
   },
   // The same client, as the app's own document: what GET /api/data answers, built from what the client opened (the
   // whitelist of trimForTrainer) with the rest empty, so the ordinary app can show it read only (frontend
@@ -2924,7 +2950,7 @@ const routes = {
     if (!user) return;
     const wait = TRAINER_READS.take(user.id);
     if (wait) return tooMany(res, wait);
-    const t = managedTarget(req, res, user);
+    const t = managedTarget(req, res, user, ['active', 'archived']);   // an archived client's diary can still be saved
     if (!t) return;
     const S = readStateStrict(t.client.id);
     if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
@@ -2934,11 +2960,11 @@ const routes = {
   'DELETE /api/trainer/managed/{id}': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
-    const t = managedTarget(req, res, user);
+    const t = managedTarget(req, res, user, ['active', 'archived']);   // and deleted, from the archive too
     if (!t) return;
     const body = await readBody(req);
     if (body.confirm !== true) return trainerFail(res, 400, 'confirm-required', 'Подтвердите удаление подопечного и его дневника');
-    if (!managedLinkFor(db, user.id, t.link.id)) return trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
+    if (!managedLinkFor(db, user.id, t.link.id, ['active', 'archived'])) return trainerFail(res, 404, 'client-gone', 'Подопечный недоступен');
     removeAccount(t.client);
     trainerReadNoted.delete(t.link.id);
     audit(req, 'trainer.managed.delete', { user, target: t.client });
@@ -2963,15 +2989,90 @@ const routes = {
     audit(req, 'trainer.schedule', { user, target: db.users.find(u => u.id === link.clientUid) });
     json(res, 200, { schedule: link.schedule });
   },
+  // Pause (TG14): the client stays, the place and the access stay; no reminder, and the days are not held against the
+  // client's plan (link.pauses, trainer.js pausedOn). 'until' is the last paused day, null is no end. The trainer's own.
+  'PUT /api/trainer/links/{id}/pause': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
+    if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    const body = await readBody(req);
+    const today = trainerToday(user);
+    const made = checkPause(body, today);
+    if (made.error) return trainerFail(res, 400, made.error, made.text);
+    if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    const before = JSON.stringify(link);
+    startPause(link, made, today, new Date().toISOString());
+    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    audit(req, 'trainer.link.pause', { user, target: db.users.find(u => u.id === link.clientUid), msg: made.until || 'open' });
+    json(res, 200, { pause: pauseOf(link, today) });
+  },
+  'DELETE /api/trainer/links/{id}/pause': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
+    if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    const today = trainerToday(user);
+    const was = pauseOf(link, today);
+    const before = JSON.stringify(link);
+    endPause(link, today);
+    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    if (was) audit(req, 'trainer.link.resume', { user, target: db.users.find(u => u.id === link.clientUid) });
+    json(res, 200, { pause: null });
+  },
+  // Archive (TG14): the place is freed, the trainer's access closes (every client route reads "not there") until the
+  // link is restored. The client's data stays where it was. For a client with Telegram the link stands (the client
+  // sees it and can end it); a managed client's diary can still be exported or deleted by its trainer.
+  'POST /api/trainer/links/{id}/archive': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
+    if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    if (archivedLinks(db, user.id).length >= ARCHIVE_LIMIT) return trainerFail(res, 409, 'archive-limit', 'В архиве слишком много подопечных, удалите ненужных', { limit: ARCHIVE_LIMIT });
+    const before = JSON.stringify(link);
+    archiveLink(link, trainerToday(user), new Date().toISOString());
+    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    trainerReadNoted.delete(link.id);
+    audit(req, 'trainer.link.archive', { user, target: db.users.find(u => u.id === link.clientUid) });
+    json(res, 200, { ok: true, archivedAt: link.archivedAt });
+  },
+  'POST /api/trainer/links/{id}/restore': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'archived' && l.coachUid === user.id) : null;
+    if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    // The place is taken again: the same limit, the same words as for a new client.
+    if (activeLinks(db, user.id).length >= TRAINER_CLIENT_LIMIT) {
+      audit(req, 'trainer.link.fail', { ok: false, user, msg: 'client-limit' });
+      return trainerFail(res, 409, 'client-limit', CLIENT_LIMIT_MESSAGE, { limit: TRAINER_CLIENT_LIMIT });
+    }
+    const before = JSON.stringify(link);
+    restoreLink(link, trainerToday(user));
+    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    audit(req, 'trainer.link.restore', { user, target: db.users.find(u => u.id === link.clientUid) });
+    json(res, 200, { ok: true });
+  },
   'DELETE /api/trainer/links/{id}': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
-    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active'
+    // Either side ends an active link; an archived one too (the client's way out, the trainer's way to clear the archive).
+    const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && (l.status === 'active' || l.status === 'archived')
       && (l.coachUid === user.id || l.clientUid === user.id)) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     if (link.managed) return trainerFail(res, 409, 'managed-link', 'Подопечный без Telegram удаляется целиком: откройте его и выберите «Удалить подопечного»');
+    const was = { status: link.status, archivedAt: link.archivedAt, pause: link.pause };
     link.status = 'revoked'; link.revokedAt = new Date().toISOString(); link.revokedBy = link.clientUid === user.id ? 'client' : 'coach';
-    try { saveDb(); } catch (error) { link.status = 'active'; delete link.revokedAt; delete link.revokedBy; throw error; }
+    delete link.archivedAt; delete link.pause;
+    try { saveDb(); } catch (error) {
+      link.status = was.status; delete link.revokedAt; delete link.revokedBy;
+      if (was.archivedAt) link.archivedAt = was.archivedAt;
+      if (was.pause) link.pause = was.pause;
+      throw error;
+    }
     trainerReadNoted.delete(link.id);
     audit(req, 'trainer.link.revoke', { user, msg: link.revokedBy });
     json(res, 200, { ok: true });
@@ -3840,8 +3941,8 @@ const server = http.createServer(async (req, res) => {
   if (sm) { key = req.method + ' /api/shares/{id}'; req.shareId = sm[1]; }
   const tm = /^\/api\/trainer\/(invites|links)\/([^/]+)$/.exec(url.pathname);
   if (tm && req.method === 'DELETE') { key = 'DELETE /api/trainer/' + tm[1] + '/{id}'; req.trainerId = tm[2]; }
-  const ts = /^\/api\/trainer\/links\/([^/]+)\/schedule$/.exec(url.pathname);
-  if (ts) { key = req.method + ' /api/trainer/links/{id}/schedule'; req.trainerId = ts[1]; }
+  const ts = /^\/api\/trainer\/links\/([^/]+)\/(schedule|pause|archive|restore)$/.exec(url.pathname);
+  if (ts) { key = req.method + ' /api/trainer/links/{id}/' + ts[2]; req.trainerId = ts[1]; }
   const td = /^\/api\/trainer\/clients\/([^/]+)\/(doc|doc\/rev)$/.exec(url.pathname);
   if (td) { key = req.method + ' /api/trainer/clients/{id}/' + td[2]; req.trainerId = td[1]; }
   const tc = /^\/api\/trainer\/clients\/([^/]+)\/data$/.exec(url.pathname);

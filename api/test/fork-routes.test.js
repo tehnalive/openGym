@@ -41,7 +41,8 @@ for (const route of ['GET /api/trainer/me', 'PUT /api/trainer/me', 'POST /api/tr
   'POST /api/trainer/managed', 'GET /api/trainer/managed/{id}', 'DELETE /api/trainer/managed/{id}', 'POST /api/trainer/managed/{id}/ops',
   'GET /api/trainer/managed/{id}/export',
   'GET /api/trainer/managed/{id}/data', 'PUT /api/trainer/managed/{id}/data', 'GET /api/trainer/managed/{id}/data/rev',
-  'GET /api/trainer/clients/{id}/doc', 'GET /api/trainer/clients/{id}/doc/rev']) {
+  'GET /api/trainer/clients/{id}/doc', 'GET /api/trainer/clients/{id}/doc/rev',
+  'PUT /api/trainer/links/{id}/pause', 'DELETE /api/trainer/links/{id}/pause', 'POST /api/trainer/links/{id}/archive', 'POST /api/trainer/links/{id}/restore']) {
   test(`trainer route ${route} exists and is documented`, () => {
     assert.ok(server.includes(`'${route}'`), `${route} missing from server.js`);
     const [method, path] = route.split(' ');
@@ -78,8 +79,23 @@ test('the only client document a trainer writes is a managed one, through commit
     "'GET /api/trainer/managed/{id}/data'", "'PUT /api/trainer/managed/{id}/data'", "'GET /api/trainer/managed/{id}/data/rev'"]) {
     const at = code.indexOf(key);
     assert.ok(at >= 0, key);
-    assert.ok(/managedTarget\(req, res, user\)/.test(code.slice(at, at + 700)), key + ' does not call managedTarget');
+    assert.ok(/managedTarget\(req, res, user[,)]/.test(code.slice(at, at + 700)), key + ' does not call managedTarget');
   }
   // A managed profile has no session, no sign-in, no reminders.
   assert.match(server, /if \(isManaged\(user\)\) return null;/);
+});
+
+test('pause and archive routes change the link only: no state file, and only the trainer\'s own link', () => {
+  for (const key of ["'PUT /api/trainer/links/{id}/pause'", "'DELETE /api/trainer/links/{id}/pause'", "'POST /api/trainer/links/{id}/archive'", "'POST /api/trainer/links/{id}/restore'"]) {
+    const at = server.indexOf(key);
+    assert.ok(at > 0, key);
+    const body = server.slice(at, server.indexOf('\n  },\n', at));
+    assert.ok(!/stateFile|atomicWrite|writeState|stateCache|commitState|readStateStrict/.test(body), key + ' touches a state file');
+    assert.ok(/l\.coachUid === user\.id/.test(body), key + ' does not pin the link to its trainer');
+    assert.ok(/status === '(active|archived)'/.test(body), key + ' does not check the link status');
+  }
+  // The access to a Telegram client stays active-only: an archived link reads as not there.
+  const target = server.slice(server.indexOf('function telegramClientTarget'), server.indexOf('function commitState'));
+  assert.match(target, /l\.status === 'active'/);
+  assert.ok(!/archived/.test(target), 'an archived link must not open a client');
 });

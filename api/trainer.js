@@ -5,7 +5,7 @@
 //   user.trainer        { enabled, since, ageConfirmedAt }
 //   db.trainerInvites   [{ id, hash, coachUid, label, created, expires, usedBy?, usedAt?, revokedAt? }]
 //   db.trainerLinks     [{ id, coachUid, clientUid, status, grants, ageConfirmedAt, consentAt, consentVersion,
-//                          createdAt, revokedAt?, revokedBy? }]
+//                          createdAt, revokedAt?, revokedBy?, archivedAt?, pause?, pauses? }]   (pause and archive: below)
 // The client's data stays in the client's own state-<uid>.json; nothing is copied to the trainer.
 import crypto from 'node:crypto';
 
@@ -42,6 +42,7 @@ export function displayName(user) {
 export const isTrainer = user => !!user && user.trainer?.enabled === true;
 
 export const activeLinks = (db, coachUid) => (db.trainerLinks || []).filter(l => l.coachUid === coachUid && l.status === 'active');
+// Only an active link gives a trainer access and takes a place; an archived one (below) does neither.
 export const clientLink = (db, clientUid) => (db.trainerLinks || []).find(l => l.clientUid === clientUid && l.status === 'active') || null;
 
 export const inviteState = (inv, now = Date.now()) =>
@@ -132,6 +133,7 @@ const minutes = hhmm => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5))
 export function reminderDecision(link, now) {
   const s = link && link.schedule;
   if (!s || !s.remind || !Array.isArray(s.days) || !s.days.length || link.status !== 'active') return null;
+  if (isPaused(link, now.date)) return null;   // on pause: no reminder, and nothing to mark as done
   const iso = now.weekday === 0 ? 7 : now.weekday;
   if (!s.days.includes(iso) || link.lastRemindDate === now.date) return null;
   const at = s.time ? Math.max(0, minutes(s.time) - REMIND_LEAD_MIN) : minutes(REMIND_DEFAULT_AT);
@@ -143,3 +145,118 @@ export function reminderDecision(link, now) {
 
 /** The words of the reminder. */
 export const reminderText = (name, time) => time ? `Сегодня к вам придёт ${name} в ${time}.` : `Сегодня у вас занятие: ${name}.`;
+
+// ---- pause and archive of a client (TG14) ----
+// A pause keeps the place and the access; the trainer is only not reminded, and the plan is not held against the
+// client. An archive frees the place and closes the trainer's access until the link is restored.
+// On the link:
+//   status   'active' | 'archived' | 'revoked'     archivedAt (ISO) while archived
+//   pause    { since: ISO, until: 'YYYY-MM-DD' | null, reason? }   only while a pause is set; `until` is the last
+//            paused day, and a date in the past means the pause is over (read lazily, no timer: isPaused)
+//   pauses   [{ from, to, archived? }]    the history, days inclusive, `to` null = still open. The archived time
+//            is recorded here too (`archived: true`), so "was the client expected on this day" is one question:
+//            pausedOn. At most PAUSES_KEEP, the oldest dropped.
+export const PAUSES_KEEP = 50;
+export const PAUSE_MAX_DAYS = 365;
+export const PAUSE_REASON_MAX = 80;
+export const ARCHIVE_LIMIT = 50;           // archived clients a trainer may keep (their diaries stay on the server)
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const validDay = d => typeof d === 'string' && ISO_DATE.test(d) && new Date(d + 'T12:00:00Z').toISOString().slice(0, 10) === d;
+export const addDays = (iso, n) => new Date(Date.parse(iso + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+
+export const archivedLinks = (db, coachUid) => (db.trainerLinks || []).filter(l => l.coachUid === coachUid && l.status === 'archived');
+/** The client's current link: active or archived (an archived one still stands until the client ends it). */
+export const currentLink = (db, clientUid) => (db.trainerLinks || []).find(l => l.clientUid === clientUid && (l.status === 'active' || l.status === 'archived')) || null;
+
+/** Whether the pause set on the link still holds on `today` ('YYYY-MM-DD'). A pause with `until` before today is over. */
+export function isPaused(link, today) {
+  const p = link && link.status === 'active' ? link.pause : null;
+  return !!p && (p.until == null || p.until >= today);
+}
+
+/** The pause to show: the set one while it holds, else null. */
+export const pauseOf = (link, today) => (isPaused(link, today) ? { since: link.pause.since, until: link.pause.until ?? null, ...(link.pause.reason ? { reason: link.pause.reason } : {}) } : null);
+
+/** Whether the client was on pause (or archived) on the day `iso`, by the history. A day before `from` or after `to`
+ *  is not; `to` null is open. */
+export function pausedOn(link, iso) {
+  return (Array.isArray(link && link.pauses) ? link.pauses : []).some(p => p && p.from <= iso && (p.to == null || iso <= p.to));
+}
+
+/** How many days of the range [from, to] (inclusive, 'YYYY-MM-DD') the client was on pause or archived. */
+export function pausedDays(link, from, to) {
+  if (!validDay(from) || !validDay(to) || to < from) return 0;
+  let n = 0;
+  for (let d = from; d <= to; d = addDays(d, 1)) if (pausedOn(link, d)) n++;
+  return n;
+}
+
+/** The body of "pause", or an error code with its text. `today` is the trainer's date. */
+export function checkPause(body, today) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || body.until === undefined) return { error: 'bad-request', text: 'Не указан срок паузы' };
+  let until = null;
+  if (body.until !== null) {
+    if (!validDay(body.until)) return { error: 'until-invalid', text: 'Дата окончания паузы указана неверно' };
+    if (body.until < today) return { error: 'until-past', text: 'Пауза не может закончиться раньше сегодняшнего дня' };
+    if (body.until > addDays(today, PAUSE_MAX_DAYS)) return { error: 'until-far', text: 'Пауза не может быть дольше года' };
+    until = body.until;
+  }
+  let reason = '';
+  if (body.reason !== undefined && body.reason !== null) {
+    if (typeof body.reason !== 'string') return { error: 'bad-request', text: 'Причина должна быть текстом' };
+    reason = body.reason.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, PAUSE_REASON_MAX);
+  }
+  return { until, reason };
+}
+
+const trimPauses = link => { if (link.pauses.length > PAUSES_KEEP) link.pauses = link.pauses.slice(-PAUSES_KEEP); };
+
+/** Set (or change) the pause on an active link. Mutates the link. */
+export function startPause(link, { until, reason }, today, nowIso) {
+  link.pauses = Array.isArray(link.pauses) ? link.pauses : [];
+  const live = isPaused(link, today);
+  if (live) {
+    // Change of an ongoing pause: its period in the history follows.
+    const last = link.pauses[link.pauses.length - 1];
+    if (last && !last.archived) last.to = until;
+    link.pause = { since: link.pause.since, until, ...(reason ? { reason } : {}) };
+  } else {
+    link.pauses.push({ from: today, to: until });
+    link.pause = { since: nowIso, until, ...(reason ? { reason } : {}) };
+  }
+  trimPauses(link);
+}
+
+/** Take the pause off from `today` on: the client is expected today again. Mutates the link. */
+export function endPause(link, today) {
+  if (link.pause && isPaused(link, today)) {
+    const yesterday = addDays(today, -1);
+    const last = (link.pauses || [])[link.pauses.length - 1];
+    if (last && !last.archived) {
+      if (last.from > yesterday) link.pauses.pop(); else last.to = yesterday;
+    }
+  }
+  delete link.pause;
+}
+
+/** Archive an active link: the pause is lifted, the archived time starts in the history. Mutates the link. */
+export function archiveLink(link, today, nowIso) {
+  endPause(link, today);
+  link.pauses = Array.isArray(link.pauses) ? link.pauses : [];
+  link.pauses.push({ from: today, to: null, archived: true });
+  trimPauses(link);
+  link.status = 'archived';
+  link.archivedAt = nowIso;
+}
+
+/** Bring an archived link back: from `today` on the client is expected again. Mutates the link. */
+export function restoreLink(link, today) {
+  const yesterday = addDays(today, -1);
+  const at = (link.pauses || []).map(p => p.archived && p.to == null).lastIndexOf(true);
+  if (at >= 0) {
+    if (link.pauses[at].from > yesterday) link.pauses.splice(at, 1); else link.pauses[at].to = yesterday;
+  }
+  link.status = 'active';
+  delete link.archivedAt;
+}

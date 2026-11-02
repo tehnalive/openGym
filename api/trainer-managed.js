@@ -29,10 +29,11 @@ export const isManaged = user => !!user && typeof user.managedBy === 'string' &&
 
 export const managedLinks = (db, coachUid) => (db.trainerLinks || []).filter(l => l.coachUid === coachUid && l.managed === true && l.status === 'active');
 
-/** The link a trainer may operate on: theirs, managed and active. Anything else reads as not there. */
-export function managedLinkFor(db, coachUid, id) {
+/** The link a trainer may operate on: theirs, managed and active (`statuses` widens it: the export and the delete also
+ *  reach an archived one). Anything else reads as not there. */
+export function managedLinkFor(db, coachUid, id, statuses = ['active']) {
   if (typeof id !== 'string') return null;
-  return (db.trainerLinks || []).find(l => l.id === id && l.managed === true && l.status === 'active' && l.coachUid === coachUid) || null;
+  return (db.trainerLinks || []).find(l => l.id === id && l.managed === true && statuses.includes(l.status) && l.coachUid === coachUid) || null;
 }
 
 const plainText = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
