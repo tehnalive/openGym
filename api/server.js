@@ -2256,6 +2256,13 @@ function trainerToday(user) {
   const tz = user.trainer && user.trainer.tz;
   return (tz && userNow(tz)?.date) || new Date().toISOString().slice(0, 10);
 }
+// The trainer's day for a request that carries the app's time zone (`tz`): the zone is kept for the reminders, as the
+// schedule does, and the day is counted in it.
+function trainerDayFor(user, body) {
+  const tz = body && typeof body.tz === 'string' && body.tz.length <= 64 ? body.tz : '';
+  if (tz && userNow(tz) && user.trainer && user.trainer.tz !== tz) user.trainer = { ...user.trainer, tz };
+  return trainerToday(user);
+}
 // The managed client behind `req.trainerId`, for its own trainer only. Another trainer's, a Telegram client's,
 // a revoked and an unknown id all read the same: not there.
 // `statuses` is for the two routes an archived client keeps (the export and the delete).
@@ -2834,7 +2841,7 @@ const routes = {
     if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Данные подопечного сейчас не читаются, попробуйте позже');
     const now = Date.now();
     if (!(trainerReadNoted.get(link.id) > now - 600000)) { trainerReadNoted.set(link.id, now); audit(req, 'trainer.read', { user, target: client }); }
-    json(res, 200, { linkId: link.id, name: displayName(client), ...clientAvatar(client, link), grants: link.grants, since: link.consentAt, data: trimForTrainer(S || {}, link.grants) });
+    json(res, 200, { linkId: link.id, name: displayName(client), ...clientAvatar(client, link), grants: link.grants, since: link.consentAt, pause: pauseOf(link, trainerToday(user)), data: trimForTrainer(S || {}, link.grants) });
   },
   // Managed clients (TG14): a diary the trainer keeps for someone without Telegram. A profile with no way in
   // (isManaged: sessionUser refuses it); every route here is the owning trainer's, and anything else reads as
@@ -2878,7 +2885,7 @@ const routes = {
     if (!t) return;
     const S = readStateStrict(t.client.id);
     if (S === UNREADABLE) return trainerFail(res, 503, 'unreadable', 'Дневник сейчас не читается, попробуйте позже');
-    json(res, 200, { linkId: t.link.id, name: displayName(t.client), note: t.link.note || '', managed: true, rev: S?._rev || 0, data: managedView(S || {}) });
+    json(res, 200, { linkId: t.link.id, name: displayName(t.client), note: t.link.note || '', managed: true, pause: pauseOf(t.link, trainerToday(user)), rev: S?._rev || 0, data: managedView(S || {}) });
   },
   'POST /api/trainer/managed/{id}/ops': async (req, res) => {
     const user = trainerCaller(req, res);
@@ -2998,7 +3005,7 @@ const routes = {
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     const body = await readBody(req);
-    const today = trainerToday(user);
+    const today = trainerDayFor(user, body);
     const made = checkPause(body, today);
     if (made.error) return trainerFail(res, 400, made.error, made.text);
     if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
@@ -3014,7 +3021,7 @@ const routes = {
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
-    const today = trainerToday(user);
+    const today = trainerDayFor(user, await readBody(req));
     const was = pauseOf(link, today);
     const before = JSON.stringify(link);
     endPause(link, today);
@@ -3031,9 +3038,11 @@ const routes = {
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    const body = await readBody(req);
     if (archivedLinks(db, user.id).length >= ARCHIVE_LIMIT) return trainerFail(res, 409, 'archive-limit', 'В архиве слишком много подопечных, удалите ненужных', { limit: ARCHIVE_LIMIT });
     const before = JSON.stringify(link);
-    archiveLink(link, trainerToday(user), new Date().toISOString());
+    if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    archiveLink(link, trainerDayFor(user, body), new Date().toISOString());
     try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
     trainerReadNoted.delete(link.id);
     audit(req, 'trainer.link.archive', { user, target: db.users.find(u => u.id === link.clientUid) });
@@ -3050,8 +3059,10 @@ const routes = {
       audit(req, 'trainer.link.fail', { ok: false, user, msg: 'client-limit' });
       return trainerFail(res, 409, 'client-limit', CLIENT_LIMIT_MESSAGE, { limit: TRAINER_CLIENT_LIMIT });
     }
+    const body = await readBody(req);
+    if (!db.trainerLinks.includes(link) || link.status !== 'archived') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     const before = JSON.stringify(link);
-    restoreLink(link, trainerToday(user));
+    restoreLink(link, trainerDayFor(user, body));
     try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
     audit(req, 'trainer.link.restore', { user, target: db.users.find(u => u.id === link.clientUid) });
     json(res, 200, { ok: true });

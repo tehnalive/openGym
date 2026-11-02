@@ -3957,7 +3957,7 @@ paths:
       tags: [data]
       operationId: deleteManagedClient
       summary: Delete a managed client and the diary
-      description: Erases the profile and its diary for good, as deleting an account does. Needs `{ "confirm": true }`. Works on an archived client too.
+      description: 'Erases the profile and its diary for good, as deleting an account does. Needs `{ "confirm": true }`. Works on an archived client too.'
       requestBody:
         required: true
         content:
@@ -4219,6 +4219,7 @@ paths:
               properties:
                 until: { type: string, nullable: true, description: 'YYYY-MM-DD or null.' }
                 reason: { type: string, maxLength: 80, description: 'Optional, e.g. "Отпуск" or "Травма".' }
+                tz: { type: string, description: 'The trainer''s time zone, kept for the days and the reminders (as for the schedule).' }
       responses:
         '200':
           description: The pause as stored.
@@ -4266,7 +4267,8 @@ paths:
         Frees the place (an archived client is not counted in the limit of five) and closes the trainer's access:
         every client route answers `404 client-gone` until the client is restored. The client's data is kept. A
         pause is lifted. A client with Telegram sees the link as archived and can end it; a client without Telegram
-        keeps only the export and the delete. At most 50 archived clients (`409 archive-limit`).
+        keeps only the export and the delete. At most 50 archived clients (`409 archive-limit`). The body may
+        carry `tz`, the trainer's time zone, so the day of the archive is the trainer's day.
       responses:
         '200':
           description: Archived.
@@ -4296,7 +4298,7 @@ paths:
       summary: Bring a client back from the archive
       description: |
         Takes a place again, so it needs a free one: with five active clients the answer is `409 client-limit`
-        with the same text as for a new client. The trainer's access is back at once.
+        with the same text as for a new client. The trainer's access is back at once. The body may carry `tz`.
       responses:
         '200':
           description: Active again.
