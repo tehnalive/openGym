@@ -170,6 +170,24 @@ describe('pause and archive helpers', () => {
     expect(pausedOnWeekday(clients, 1).map(x => x.name)).toEqual(['Петя'])
     expect(pausedOnWeekday(clients, 2)).toEqual([])
   })
+  it('hides a client in the week only on the days up to the end of the pause, included', async () => {
+    const { clientsOn, weekPlan, pausedOnWeekday, dateOfWeekday, archivedText } = await import('./trainer.js')
+    const now = new Date(2026, 10, 3, 10)   // Tuesday 3 Nov 2026
+    const petya = { linkId: 'b', name: 'Петя', schedule: { days: [2, 4, 6, 1], time: '', remind: false }, pause: { until: '2026-11-05' } }
+    expect([1, 2, 3, 4, 6, 7].map(i => dateOfWeekday(i, now))).toEqual(['2026-11-09', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-07', '2026-11-08'])
+    // Tue (today) and Thu (the last paused day) are off; Sat and the next Monday are after the pause: expected again.
+    expect(clientsOn([petya], 2, now)).toEqual([])
+    expect(clientsOn([petya], 4, now)).toEqual([])
+    expect(clientsOn([petya], 6, now).map(x => x.name)).toEqual(['Петя'])
+    expect(clientsOn([petya], 1, now).map(x => x.name)).toEqual(['Петя'])
+    expect(weekPlan([petya], now).filter(d => d.clients.length).map(d => d.short)).toEqual(['Пн', 'Сб'])
+    expect(pausedOnWeekday([petya], 4, now).map(x => x.name)).toEqual(['Петя'])
+    expect(pausedOnWeekday([petya], 6, now)).toEqual([])
+    // A pause with no end covers every day.
+    expect(clientsOn([{ ...petya, pause: { until: null } }], 6, now)).toEqual([])
+    // The archive date is the trainer's day when the server sends it.
+    expect(archivedText('2026-11-03')).toMatch(/^В архиве с 3 нояб/)
+  })
 })
 
 describe('plan compliance wording', () => {

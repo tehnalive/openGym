@@ -289,3 +289,37 @@ describe('"my trainer" on the client\'s side', () => {
     expect(host.textContent).not.toContain('Пауза'); expect(host.textContent).not.toContain('архиве')
   })
 })
+
+describe('review of the pause and archive screens', () => {
+  it('takes the reason of the running pause as the chosen chip', async () => {
+    const { default: ClientLifecycle } = await import('../components/TrainerLifecycle.jsx')
+    const host = mount('/x', <ClientLifecycle linkId="link-aaaa-1" name="Вася" pause={{ since: '2026-11-01T00:00:00Z', until: '2026-11-15', reason: 'Травма' }} />)
+    const chip = text => [...host.querySelectorAll('[aria-label="Причина паузы"] button')].find(b => b.textContent === text)
+    expect(chip('Травма').getAttribute('aria-pressed')).toBe('true')
+    expect(chip('Отпуск').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('sends one restore for a double tap, and shows the wait on the button', async () => {
+    let done
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/me': ME(), 'GET /api/trainer/clients': CLIENTS(),
+      'POST /api/trainer/links/link-cccc-3/restore': () => new Promise(r => { done = () => r({ ok: true }) }) }))
+    const host = mount('/trainer')
+    await flush()
+    click(button(host, 'Архив (2)'))
+    const kolya = () => [...host.querySelectorAll('.list .item')].find(x => x.textContent.includes('Коля'))
+    const tap = button(kolya(), 'Вернуть'); click(tap); click(tap)
+    expect(calls('POST', '/api/trainer/links/link-cccc-3/restore')).toHaveLength(1)
+    expect(button(kolya(), 'Возвращаем').disabled).toBe(true)
+    expect(button([...host.querySelectorAll('.list .item')].find(x => x.textContent.includes('Мама')), 'Вернуть').disabled).toBe(true)   // and no other restore meanwhile
+    await act(async () => { done(); await new Promise(r => setTimeout(r, 0)) })
+  })
+
+  it('says the day of the archive from the trainer\'s own day', async () => {
+    mocks.api.mockImplementation(route({ 'GET /api/trainer/me': ME(), 'GET /api/trainer/clients': CLIENTS({ archived: [
+      { linkId: 'link-cccc-3', name: 'Коля', managed: false, archivedAt: '2026-11-03T23:30:00Z', archivedOn: '2026-11-04' }] }) }))
+    const host = mount('/trainer')
+    await flush()
+    click(button(host, 'Архив (1)'))
+    expect(host.textContent).toMatch(/В архиве с 4 нояб/)
+  })
+})

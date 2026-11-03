@@ -31,6 +31,7 @@ export default function TrainerHome() {
   const [clients, setClients] = useState(null)
   const [archived, setArchived] = useState([])   // the archive: names only, the trainer has no access to their data
   const [archiveOpen, setArchiveOpen] = useState(false)
+  const [restoring, setRestoring] = useState(null)   // the link id being brought back: one at a time, no double tap
   const [archiveError, setArchiveError] = useState({})   // by link id: the refusal of "bring back"
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -81,9 +82,12 @@ export default function TrainerHome() {
   }
   const setSchedule = (linkId, schedule) => setClients(list => list.map(c => (c.linkId === linkId ? { ...c, schedule } : c)))
   const restore = async c => {
+    if (restoring) return
+    setRestoring(c.linkId)
     setArchiveError(e => ({ ...e, [c.linkId]: '' }))
     try { await trainerApi.restore(c.linkId); toast('Подопечный вернулся из архива'); await load() }
     catch (e) { setArchiveError(x => ({ ...x, [c.linkId]: errorText(e) })) }
+    finally { setRestoring(null) }
   }
   const exportArchived = async c => {
     try {
@@ -200,9 +204,9 @@ export default function TrainerHome() {
         <div className="row" style={{ gap: 10, alignItems: 'center' }}>
           <ProfileAvatar user={{ id: c.linkId, name: c.name, avatarUrl: c.avatarUrl }} size={32} neutral />
           <div className="grow"><div className="tt">{c.name}</div>
-            <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + archivedText(c.archivedAt)}</div></div></div>
+            <div className="ss">{(c.managed ? 'Без Telegram · ' : '') + archivedText(c.archivedOn || c.archivedAt)}</div></div></div>
         <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-          <button className="btn primary" style={{ width: 'auto' }} onClick={() => restore(c)}>Вернуть</button>
+          <button className="btn primary" style={{ width: 'auto' }} disabled={!!restoring} onClick={() => restore(c)}>{restoring === c.linkId ? 'Возвращаем…' : 'Вернуть'}</button>
           {c.managed && <button className="btn" style={{ width: 'auto' }} onClick={() => exportArchived(c)}>Скачать данные</button>}
           {c.managed && <button className="btn danger" style={{ width: 'auto' }} onClick={() => removeArchived(c)}>Удалить</button>}
           {!c.managed && <button className="btn" style={{ width: 'auto' }} onClick={() => endArchived(c)}>Завершить связь</button>}

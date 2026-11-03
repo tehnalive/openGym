@@ -129,15 +129,25 @@ export function scheduleText(s) {
 
 const byTime = (a, b) => (a.time || '99:99') < (b.time || '99:99' ) ? -1 : (a.time || '99:99') > (b.time || '99:99') ? 1 : a.name.localeCompare(b.name, 'ru')
 
+/** The date ('YYYY-MM-DD') of the next ISO weekday `iso` counted from `now`: today for today's weekday, else within the
+ *  coming six days. The week of the cabinet is that window. */
+export function dateOfWeekday(iso, now = new Date()) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + ((iso - isoWeekday(now) + 7) % 7), 12)
+  return isoOf(d)
+}
+/** Whether the client's pause covers that date: it started today or before, and `until` is the last paused day (null: no end). */
+export const pausedOnDate = (c, date) => !!c.pause && (c.pause.until == null || c.pause.until >= date)
+
 /** Who is expected on this ISO weekday: [{ linkId, name, time, remind }], the booked times first, by time. A client on
- *  pause is not expected (see pausedOn). */
-export function clientsOn(clients, iso) {
-  return (clients || []).filter(c => c.schedule?.days?.includes(iso) && !c.pause)
+ *  pause is not expected on the days the pause covers (that weekday's date counted from today), and is on the days after. */
+export function clientsOn(clients, iso, now = new Date()) {
+  const date = dateOfWeekday(iso, now)
+  return (clients || []).filter(c => c.schedule?.days?.includes(iso) && !pausedOnDate(c, date))
     .map(c => ({ linkId: c.linkId, name: c.name, time: c.schedule.time || '', remind: !!c.schedule.remind, client: c })).sort(byTime)
 }
 
 /** The whole week for the cabinet: one entry per weekday. */
-export const weekPlan = clients => WEEKDAYS.map(w => ({ ...w, clients: clientsOn(clients, w.iso) }))
+export const weekPlan = (clients, now = new Date()) => WEEKDAYS.map(w => ({ ...w, clients: clientsOn(clients, w.iso, now) }))
 
 // ---- pause and archive of a client ----
 // A pause keeps the place and the access; the trainer is not reminded. An archive frees the place and closes the access.
@@ -163,8 +173,8 @@ export function pauseText(pause) {
   return [pause.until ? 'Пауза до ' + shortDate(pause.until) : 'Пауза', pause.reason].filter(Boolean).join(' · ')
 }
 /** The clients on pause who would otherwise be expected on this ISO weekday: for the muted line under "Сегодня". */
-export const pausedOnWeekday = (clients, iso) => (clients || []).filter(c => c.pause && c.schedule?.days?.includes(iso))
-/** "в архиве с 3 нояб." */
+export const pausedOnWeekday = (clients, iso, now = new Date()) => (clients || []).filter(c => c.schedule?.days?.includes(iso) && pausedOnDate(c, dateOfWeekday(iso, now)))
+/** "в архиве с 3 нояб.": from the trainer's day the server sends (`archivedOn`), else the date part of the time. */
 export const archivedText = iso => (iso && shortDate(iso.slice(0, 10)) ? 'В архиве с ' + shortDate(iso.slice(0, 10)) : 'В архиве')
 
 // ---- plan compliance over 7, 30 and 90 days (TG14, section 15 of docs/telegram/TRAINER_MODE.md) ----

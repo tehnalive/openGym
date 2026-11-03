@@ -13,7 +13,7 @@ export const ARCHIVE_CONFIRM = 'Место освободится. Данные 
 // "pause" is what the server last said (or null); onPause(pause) hears every change, onArchived() the archive.
 export default function ClientLifecycle({ linkId, name, pause: initial = null, onPause, onArchived }) {
   const [pause, setPause] = useState(initial)
-  const [reason, setReason] = useState('')
+  const [reason, setReason] = useState(initial?.reason || '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -35,8 +35,10 @@ export default function ClientLifecycle({ linkId, name, pause: initial = null, o
   const archive = () => confirmSheet({
     title: 'Перенести в архив?', message: ARCHIVE_CONFIRM, confirmText: 'В архив',
     onConfirm: async () => {
+      if (busy) return
+      setBusy(true)
       try { await trainerApi.archive(linkId); toast('Подопечный в архиве. Место освободилось.'); onArchived?.() }
-      catch (e) { toast(errorText(e)) }
+      catch (e) { toast(errorText(e)); setBusy(false) }
     },
   })
 
@@ -65,7 +67,7 @@ export default function ClientLifecycle({ linkId, name, pause: initial = null, o
       <div className="dim small" style={{ lineHeight: 1.4, marginBottom: 10 }}>
         {name} не занимает место из пяти. Данные сохраняются, вернуть из архива можно в любой момент, если есть свободное место.
       </div>
-      <button className="btn" onClick={archive}>В архив</button>
+      <button className="btn" disabled={busy} onClick={archive}>В архив</button>
     </div>
   </>
 }
