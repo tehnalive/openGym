@@ -195,6 +195,9 @@ test('the data screen and the read only document carry it; a closed history does
   assert.deepEqual(data.body.schedule.days, EVERY);
   const doc = await coach.get(`/api/trainer/clients/${l1}/doc`);
   assert.deepEqual(doc.body.compliance, listed);
+  const rev = await coach.get(`/api/trainer/clients/${l1}/doc/rev`);
+  assert.deepEqual(rev.body.compliance, listed, 'the revision poll carries it too, so the read only tiles follow the diary');
+  assert.equal((await coach.get(`/api/trainer/clients/${l2}/doc/rev`)).body.compliance, null);
   // History closed: the screens answer as they did, with null.
   assert.equal((await coach.get(`/api/trainer/clients/${l2}/data`)).body.compliance, null);
   assert.equal((await coach.get(`/api/trainer/clients/${l2}/doc`)).body.compliance, null);

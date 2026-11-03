@@ -171,7 +171,7 @@ export const ARCHIVE_LIMIT = 50;           // archived clients a trainer may kee
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // A real calendar day. Date.parse says NaN for 2026-13-45 or 0000-00-00 (toISOString would throw a RangeError on them).
-const validDay = d => {
+export const validDay = d => {
   if (typeof d !== 'string' || !ISO_DATE.test(d)) return false;
   const at = Date.parse(d + 'T12:00:00Z');
   return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === d;

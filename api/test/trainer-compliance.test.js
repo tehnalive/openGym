@@ -103,8 +103,9 @@ test('the day the link began is the trainer\'s day, not UTC', () => {
   assert.equal(dateIn('2026-11-02T23:30:00.000Z'), '2026-11-02');
   assert.equal(dateIn('garbage', 'UTC'), null);
   const link = { createdAt: '2026-11-02T23:30:00.000Z' };
-  const utc = complianceOf({ workouts: [], schedule: { days: [1, 2] }, link, today: TODAY, tz: 'UTC' });
-  const almaty = complianceOf({ workouts: [], schedule: { days: [1, 2] }, link, today: TODAY, tz: 'Asia/Almaty' });
+  // (the first day of the link counts only with a workout on it, so each case has one on its own first day)
+  const utc = complianceOf({ workouts: w('2026-11-02'), schedule: { days: [1, 2] }, link, today: TODAY, tz: 'UTC' });
+  const almaty = complianceOf({ workouts: w('2026-11-03'), schedule: { days: [1, 2] }, link, today: TODAY, tz: 'Asia/Almaty' });
   assert.equal(utc.d7.from, '2026-11-02');
   assert.equal(almaty.d7.from, '2026-11-03');
   assert.deepEqual([utc.d7.planned, almaty.d7.planned], [2, 1]);
@@ -256,4 +257,61 @@ test('attention: the guard of four planned days against a month thinned out by p
   assert.deepEqual([four.d30.planned, four.d30.done, four.d30.pct, four.d7.pct, four.attention], [4, 2, 50, 0, 'drop']);
   const three = complianceOf({ workouts, schedule: mondays, link: { ...old, pauses: [{ from: '2026-10-12', to: '2026-10-13' }, { from: '2026-10-19', to: '2026-10-19' }, { from: '2026-11-01', to: '2026-11-01' }] }, today: TODAY });
   assert.deepEqual([three.d30.planned, three.d30.pct, three.d7.pct, three.attention], [3, 67, 0, null]);
+});
+
+test('a date that is not on the calendar is no workout: it cannot break the last workout or silence the signal', () => {
+  const c = complianceOf({ workouts: [{ d: '2026-10-99' }, { d: '2026-13-01' }, { d: '0000-00-00' }, { d: '2026-02-30' }, { d: '2026-10-30' }], schedule: null, link: old, today: TODAY });
+  assert.deepEqual([c.lastWorkout, c.daysSinceLast], ['2026-10-30', 5]);
+  // Nothing but junk: no last workout, and a client old enough is quiet (the junk does not hide it).
+  const junk = complianceOf({ workouts: [{ d: '2026-10-99' }], schedule: null, link: old, today: TODAY });
+  assert.deepEqual([junk.lastWorkout, junk.daysSinceLast, junk.attention], [null, null, 'quiet']);
+  assert.ok(!Number.isNaN(junk.d7.workouts));
+  assert.equal(complianceOf({ workouts: w('2026-10-30'), schedule: null, link: old, today: '2026-02-30' }).d7.pct, null, 'a junk today is refused too');
+});
+
+test('a moved session covers a missed planned day of its own ISO week only', () => {
+  // Plan Mon/Wed/Fri. Three full weeks (Mon 10-12 .. Sun 11-01), the client comes on Tuesday and Thursday only.
+  const tuThu = [];
+  for (const monday of ['2026-10-12', '2026-10-19', '2026-10-26']) tuThu.push(addDays(monday, 1), addDays(monday, 3));
+  const c = complianceOf({ workouts: w(...tuThu), schedule: MWF, link: old, today: '2026-11-02' });
+  assert.deepEqual([c.d30.from, c.d30.to], ['2026-10-03', '2026-11-01']);
+  // The window holds Mon 10-05's week from Saturday on: Fri 10-09 (week of 10-05) is missed, with no workout in that week.
+  // Weeks 10-12, 10-19, 10-26: planned 3, two moved sessions each: 2 of 3 each.
+  const weeks = complianceOf({ workouts: w(...tuThu), schedule: MWF, link: old, today: '2026-11-02' });
+  assert.deepEqual([weeks.d7.planned, weeks.d7.done, weeks.d7.pct], [3, 2, 67], 'the last week alone: 2 of 3');
+  // 30 days: 10-03..11-01 = week of 9/28 (Sat, Sun: nothing planned), 3 full weeks and the tail: Fri 10-09 is in the week of 10-05.
+  // Planned: Mon10-05 Wed10-07 Fri10-09 (week 10-05) + 3 + 3 + 3 = 12; done: 0 + 2 + 2 + 2 = 6 (the week of 10-05 had no workout).
+  assert.deepEqual([weeks.d30.planned, weeks.d30.done, weeks.d30.pct], [12, 6, 50]);
+  // The older formula would have let one busy week cover the others: a week with 5 extra days and a week with none.
+  const busy = complianceOf({ workouts: w('2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01'), schedule: MWF, link: old, today: '2026-11-02' });
+  assert.equal(busy.d7.done, 3, 'a full week is 3 of 3 and the surplus is lost');
+  assert.deepEqual([busy.d30.planned, busy.d30.done], [12, 3], 'it does not make up for the three weeks before it');
+});
+
+test('the first day of the link is planned only with a workout on it', () => {
+  const link = { createdAt: '2026-11-02T09:00:00.000Z' };   // Monday
+  const without = complianceOf({ workouts: [], schedule: { days: [1, 2] }, link, today: TODAY });
+  assert.deepEqual([without.d7.from, without.d7.planned], ['2026-11-03', 1], 'Monday is not held against a client who came in the afternoon');
+  const withIt = complianceOf({ workouts: w('2026-11-02'), schedule: { days: [1, 2] }, link, today: TODAY });
+  assert.deepEqual([withIt.d7.from, withIt.d7.planned, withIt.d7.done], ['2026-11-02', 2, 1]);
+  // Created today, nothing done: the window is empty (starts tomorrow).
+  assert.equal(complianceOf({ workouts: [], schedule: MWF, link: { createdAt: TODAY + 'T01:00:00.000Z' }, today: TODAY }).d7.from, null);
+});
+
+test('the last workout may be tomorrow (the client\'s zone is ahead), the age is never negative, and the percentages stop at today', () => {
+  const c = complianceOf({ workouts: w('2026-11-05'), schedule: MWF, link: old, today: TODAY });
+  assert.deepEqual([c.lastWorkout, c.daysSinceLast], ['2026-11-05', 0]);
+  assert.equal(c.d7.workouts, 0, 'tomorrow is not in the window');
+  assert.equal(c.d7.to, '2026-11-03');
+  const far = complianceOf({ workouts: w('2026-11-06'), schedule: MWF, link: old, today: TODAY });
+  assert.equal(far.lastWorkout, null, 'two days ahead is a wrong clock, not a workout');
+});
+
+test('a client without Telegram: the window begins at the first workout when the trainer filled the diary in later', () => {
+  const link = { createdAt: '2026-11-02T09:00:00.000Z', managed: true };
+  const c = complianceOf({ workouts: w('2026-10-21', '2026-10-23', '2026-10-26'), schedule: MWF, link, today: TODAY });
+  assert.equal(c.d30.from, '2026-10-21');
+  assert.deepEqual([c.d30.planned, c.d30.done], [6, 3], 'Wed 10-21, Fri 10-23, Mon 10-26, Wed 10-28, Fri 10-30, Mon 11-02; the first three were done');
+  const telegram = complianceOf({ workouts: w('2026-10-21', '2026-10-23', '2026-10-26'), schedule: MWF, link: { ...link, managed: false }, today: TODAY });
+  assert.equal(telegram.d30.from, '2026-11-03', 'a client with Telegram has no diary before the link');
 });

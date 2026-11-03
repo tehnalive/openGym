@@ -5,10 +5,14 @@
 //   window      N days ending yesterday; today is in only when a workout is already logged today. The window does not
 //               start before the link did, and a day of pause or archive is not counted either way.
 //   planned     the days of the window whose ISO weekday is in the schedule, minus the paused days
-//   done        planned days with a workout, plus the workouts of other (unplanned, not paused) days as moved sessions,
-//               never more than planned. A day is a day: two workouts on it are one.
+//   done        planned days with a workout, plus moved sessions: a workout on an unplanned (not paused) day covers a
+//               missed planned day of the SAME ISO week (Monday to Sunday), as many as there are of each, so extra
+//               days of one week never make up for another week. A day is a day: two workouts on it are one.
+//   start       the link's first day counts as planned only if there was a workout on it, else the window begins the
+//               next day; for a client without Telegram, whose diary the trainer fills in later, the window begins
+//               at the earlier of the link and the first workout.
 //   pct         round(done / planned * 100), or null when nothing was planned (shown as "no plan", never as 0 %)
-import { addDays, isPaused, pausedOn } from './trainer.js';
+import { addDays, isPaused, pausedOn, validDay } from './trainer.js';
 
 export const WINDOWS = [7, 30, 90];
 export const QUIET_DAYS = 7;          // no workout for this long: 'quiet'
@@ -43,33 +47,43 @@ const emptyWindow = () => ({ planned: 0, done: 0, pct: null, workouts: 0, from: 
 export function complianceOf({ workouts, schedule, link, today, tz } = {}) {
   const out = { d7: emptyWindow(), d30: emptyWindow(), d90: emptyWindow(), hasSchedule: false, lastWorkout: null, daysSinceLast: null, attention: null };
   if (typeof today !== 'string' || !ISO_DATE.test(today)) return out;
-  // The training days: one per date, a date in the future (a clock that ran ahead) is not a day that happened.
+  // The training days: one per real calendar date (2026-10-99 is not one). For the percentages only up to today; for "the
+  // last workout" up to tomorrow too, as the client's zone may be ahead of the trainer's. Never a negative age.
+  if (!validDay(today)) return out;
+  const tomorrow = addDays(today, 1);
   const trained = new Set();
+  let last = '', first = '';
   for (const w of Array.isArray(workouts) ? workouts : []) {
-    if (w && typeof w.d === 'string' && ISO_DATE.test(w.d) && w.d <= today) trained.add(w.d);
+    if (!w || !validDay(w.d) || w.d > tomorrow) continue;
+    if (w.d > last) last = w.d;
+    if (w.d <= today) { trained.add(w.d); if (!first || w.d < first) first = w.d; }
   }
-  let last = '';
-  for (const d of trained) if (d > last) last = d;
-  if (last) { out.lastWorkout = last; out.daysSinceLast = daysBetween(last, today); }
+  if (last) { out.lastWorkout = last; out.daysSinceLast = Math.max(0, daysBetween(last, today)); }
 
   const plan = new Set(Array.isArray(schedule && schedule.days) ? schedule.days.filter(d => Number.isInteger(d) && d >= 1 && d <= 7) : []);
   out.hasSchedule = plan.size > 0;
-  const start = link && link.createdAt ? dateIn(link.createdAt, tz) : null;
+  const start = link && link.createdAt ? dateIn(link.createdAt, tz) : null;   // the link's first day
+  // Where the windows may begin: after the first day unless it has a workout; a diary kept by the trainer from the first workout.
+  let begin = start && !trained.has(start) ? addDays(start, 1) : start;
+  if (link && link.managed === true && first && (!start || first < start)) begin = first;
   const end = trained.has(today) ? today : addDays(today, -1);
 
   for (const n of WINDOWS) {
     let from = addDays(end, -(n - 1));
-    if (start && from < start) from = start;
+    if (begin && from < begin) from = begin;
     if (from > end) continue;
-    let planned = 0, hit = 0, moved = 0, workoutsIn = 0;
+    let planned = 0, done = 0, workoutsIn = 0;
+    let missed = 0, moved = 0;   // of the ISO week being walked
+    const closeWeek = () => { done += Math.min(missed, moved); missed = 0; moved = 0; };
     for (let d = from; d <= end; d = addDays(d, 1)) {
+      if (isoWeekday(d) === 1) closeWeek();
       const paused = pausedOn(link, d);
       const did = trained.has(d);
       if (did) workoutsIn++;
-      if (plan.has(isoWeekday(d)) && !paused) { planned++; if (did) hit++; }
+      if (plan.has(isoWeekday(d)) && !paused) { planned++; if (did) done++; else missed++; }
       else if (did && !paused) moved++;
     }
-    const done = Math.min(planned, hit + moved);
+    closeWeek();
     out['d' + n] = { planned, done, pct: planned > 0 ? Math.round(done * 100 / planned) : null, workouts: workoutsIn, from, to: end };
   }
 
