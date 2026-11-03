@@ -159,3 +159,25 @@ test('templates and offers (section 17): a client document is written only for a
   assert.match(server.slice(server.indexOf('function takeOffer('), server.indexOf('function takeOffer(') + 200), /clientLink\(db, user\.id\)/);
   assert.match(read('../trainer.js').split('export function archiveLink')[1].split('\n}')[0], /delete link\.offers/);
 });
+
+test('plan compliance is computed in one place, and only for a link with the history opened', () => {
+  const calls = [...server.matchAll(/complianceOf\(/g)].length;
+  assert.equal(calls, 1, 'complianceOf is called from one place');
+  const at = server.indexOf('function trainerCompliance');
+  assert.ok(at > 0);
+  const body = server.slice(at, server.indexOf('\n}\n', at));
+  assert.ok(body.includes('complianceOf('), 'and that place is trainerCompliance');
+  assert.match(body, /!link\.grants \|\| !link\.grants\.history/);
+  // Every route that sends it goes through trainerCompliance.
+  assert.ok([...server.matchAll(/trainerCompliance\(user, /g)].length >= 5);
+});
+
+test('managedLinkFor opens an active link unless told otherwise', async () => {
+  const src = read('../trainer-managed.js');
+  assert.match(src, /export function managedLinkFor\(db, coachUid, id, statuses = \['active'\]\)/);
+  const { managedLinkFor } = await import('../trainer-managed.js');
+  const db = { trainerLinks: [{ id: 'a', managed: true, status: 'archived', coachUid: 'c' }, { id: 'b', managed: true, status: 'active', coachUid: 'c' }] };
+  assert.equal(managedLinkFor(db, 'c', 'a'), null, 'an archived diary does not open by default');
+  assert.equal(managedLinkFor(db, 'c', 'b').id, 'b');
+  assert.equal(managedLinkFor(db, 'c', 'a', ['active', 'archived']).id, 'a');
+});

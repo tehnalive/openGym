@@ -3830,7 +3830,7 @@ paths:
       tags: [data]
       operationId: getTrainerClientRevision
       summary: The real revision of a Telegram client's document
-      description: Just the revision, as `GET /api/data/rev` for the client itself; for the app's poll in read only mode.
+      description: Just the revision, as `GET /api/data/rev` for the client itself; for the app's poll in read only mode. It carries the plan compliance too (as in the document answer), so the tiles follow the diary.
       responses:
         '200':
           description: The revision.
@@ -3841,6 +3841,7 @@ paths:
                 properties:
                   rev: { type: integer }
                   wid: { type: string }
+                  compliance: { $ref: '#/components/schemas/TrainerCompliance' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: 'Not the caller''s active client (`client-gone`).'
@@ -4793,7 +4794,7 @@ paths:
         '404':
           description: 'Not the caller''s archived link (`link-gone`).'
         '409':
-          description: '`client-limit` or `consent-outdated`.'
+          description: '`client-limit`, or `consent-outdated` ("Подопечному нужно заново принять приглашение. Завершите связь и отправьте новое приглашение.").'
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/trainer/links/{id}:
@@ -5003,9 +5004,10 @@ components:
       description: |
         How well the client keeps to the schedule the trainer set, for the trainer's screens (never the client's).
         `null` when the client did not open the history. Each window is N days ending yesterday (today joins it
-        only once a workout is logged today), not starting before the link did. `planned` is the days of the
+        only once a workout is logged today), not starting before the link did (its first day counts only with a workout on it;
+        for a client without Telegram the window starts at the first workout if that is earlier). `planned` is the days of the
         window whose weekday is in the schedule, minus the days of pause and archive; `done` is the planned days
-        with a workout plus workouts on other days (a moved session), never more than `planned`; one day with
+        with a workout plus moved sessions (a workout on another day covers a missed planned day of the same ISO week), never more than `planned`; one day with
         several workouts counts once. `pct` is round(done / planned * 100), or null when nothing was planned
         (no schedule, or only pause): "no plan", never 0 %. `workouts` is the training days in the window either way.
         Dates are YYYY-MM-DD: the trainer's day, and the client's own dates of their workouts.

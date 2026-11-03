@@ -66,7 +66,7 @@ const PRESENCE = [
   ['Pause and archive: cabinet screen', 'frontend/src/components/TrainerLifecycle.jsx', 'has', 'export const ARCHIVE_CONFIRM'],
   ['Plan compliance: the formula', 'api/trainer-compliance.js', 'has', 'export function complianceOf'],
   ['Plan compliance: API image ships it', 'api/Dockerfile', 'has', 'trainer-compliance.js'],
-  ['Plan compliance: only with the history grant', 'api/server.js', 'has', 'function trainerCompliance'],
+  ['Plan compliance: only with the history grant', 'api/server.js', 'has', '!link.grants || !link.grants.history'],
   ['Plan compliance: in openapi.yaml', 'api/openapi.yaml', 'has', 'TrainerCompliance:'],
   ['Plan compliance: cabinet card', 'frontend/src/views/TrainerHome.jsx', 'has', '<AttentionCard'],
   ['Trainer templates: assign route', 'api/server.js', 'has', "'POST /api/trainer/templates/{id}/assign'"],
