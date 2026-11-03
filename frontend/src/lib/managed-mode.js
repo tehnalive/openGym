@@ -197,7 +197,13 @@ function guardFetch(win, i) {
     const r = routeFor(method, target.path, target.search, i.id, i.kind || 'managed')
     if (r.kind === 'block') return Promise.resolve(blockedAnswer())
     if (r.kind === 'me') return Promise.resolve(meAnswer(i))
-    if (r.kind === 'pass') return real(input, init)
+    if (r.kind === 'pass') {
+      // The trainer's own session answers these. The profile header names the client here (the app signs in as the
+      // client), which the server takes for another account and refuses (409 account-changed), so it does not go.
+      const h = new Headers((init && init.headers) || (isReq ? input.headers : undefined))
+      h.delete('x-opengym-user')
+      return isReq && !(init && init.headers) ? real(new Request(input, { headers: h }), init) : real(input, { ...(init || {}), headers: h })
+    }
     if (r.kind === 'swallow') return Promise.resolve(json(200, { ok: true, rev: seen.rev, ...(seen.wid ? { wid: seen.wid } : {}), ts: null }))
     if (r.kind === 'config') {
       return real(input, init).then(async res => {

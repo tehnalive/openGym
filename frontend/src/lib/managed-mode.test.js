@@ -161,6 +161,25 @@ describe('the network guard', () => {
     }
   })
 
+  it('the export and the deleting of this diary go without the client profile header, which the server would refuse', async () => {
+    const real = vi.fn(async () => new Response('{}'))
+    const win = fakeWindow({ fetchImpl: real })
+    installManagedGuards(win, { id: ID, name: 'Мама' })
+    const headers = { 'Content-Type': 'application/json', 'X-OpenGym-User': 'managed-' + ID }
+    await win.fetch(`/api/trainer/managed/${ID}/export`, { headers })
+    await win.fetch(`/api/trainer/managed/${ID}`, { method: 'DELETE', headers, body: '{"confirm":true}' })
+    await win.fetch(new Request(`https://gym.example/api/trainer/managed/${ID}/export`, { headers }))
+    expect(real.mock.calls).toHaveLength(3)
+    for (const [input, init] of real.mock.calls) {
+      const sent = new Headers(init && init.headers ? init.headers : input.headers)
+      expect(sent.get('x-opengym-user')).toBeNull()
+    }
+    expect(real.mock.calls[0][1].headers.get('content-type')).toBe('application/json')
+    expect(real.mock.calls[1][1].method).toBe('DELETE')
+    expect(real.mock.calls[1][1].body).toBe('{"confirm":true}')
+    expect(real.mock.calls[0][0]).toBe(`/api/trainer/managed/${ID}/export`)
+  })
+
   it('keeps the app\'s subpath, passes foreign and non-API URLs through, and trims the config', async () => {
     const answer = url => (String(url).endsWith('/api/config')
       ? new Response(JSON.stringify({ invite_only: true, telegram_login: true, coach: { on: 1 }, media: {}, default_lang: 'ru' })) : new Response('{}'))
