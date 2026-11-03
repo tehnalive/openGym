@@ -1,7 +1,7 @@
 // A client's profile in the trainer's cabinet (TG14, stage 1): history, measurements and muscle
 // statistics, read only. The data lives in this component's state and nowhere else: not the store, not
 // localStorage, not a backup. There is no input and no save here by design (TrainerClient.test.jsx).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText, SECTIONS, clientView, workoutRows, muscleRows, RANGES } from '../lib/trainer.js'
@@ -95,7 +95,7 @@ export function Muscles({ view }) {
 }
 
 // What the client opened for the trainer, since when, and the way to end the link: the client's own screen of it.
-function ClientSettings({ res, linkId, onDone }) {
+function ClientSettings({ res, linkId, onDone, onPause }) {
   const since = (() => { const d = new Date(res.since); return Number.isNaN(+d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) })()
   return <>
     <div className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
@@ -108,7 +108,7 @@ function ClientSettings({ res, linkId, onDone }) {
         <span>{x.label}</span><span className={res.grants[x.key] ? '' : 'dim'}>{res.grants[x.key] ? 'открыто' : 'закрыто'}</span></div>)}
       <div className="dim small" style={{ marginTop: 8, lineHeight: 1.4 }}>{res.name} видит этот доступ у себя и может закрыть его сам. Данные остаются у подопечного.</div>
     </div>
-    <ClientLifecycle linkId={linkId} name={res.name} pause={res.pause} onArchived={onDone} />
+    <ClientLifecycle linkId={linkId} name={res.name} pause={res.pause} onPause={onPause} onArchived={onDone} />
     <button className="btn danger" onClick={() => confirmSheet({
       title: 'Завершить связь?', message: `Вы перестанете видеть данные: ${res.name}. Подопечный сможет пригласить вас снова.`,
       confirmText: 'Завершить', danger: true,
@@ -127,17 +127,23 @@ export default function TrainerClient() {
   const [error, setError] = useState('')
   const [tab, setTab] = useState(null)
   const [settings, setSettings] = useState(false)
+  // Only the newest answer counts: a slow reply to an older read must not put old numbers back.
+  const seq = useRef(0)
   useEffect(() => {
     let gone = false
+    const n = ++seq.current
     setRes(null); setError('')
-    trainerApi.clientData(linkId).then(r => { if (!gone) { setRes(r); setTab(SECTIONS.find(s => r.grants[s.key])?.key || null) } })
-      .catch(e => { if (!gone) setError(errorText(e)) })
+    trainerApi.clientData(linkId).then(r => { if (!gone && n === seq.current) { setRes(r); setTab(SECTIONS.find(s => r.grants[s.key])?.key || null) } })
+      .catch(e => { if (!gone && n === seq.current) setError(errorText(e)) })
     return () => { gone = true }
   }, [linkId])
+  // After a pause, a lifted pause or a new schedule the percentages change: read the client again.
+  const refresh = () => {
+    const n = ++seq.current
+    trainerApi.clientData(linkId).then(r => { if (n === seq.current) setRes(x => (x ? { ...x, schedule: r.schedule, compliance: r.compliance, pause: r.pause } : x)) }).catch(() => {})
+  }
   // A new schedule changes the plan the percentages are counted against: read them again.
-  const planSheet = () => scheduleSheet({ linkId, name: res.name, schedule: res.schedule, onSaved: () => {
-    trainerApi.clientData(linkId).then(r => setRes(x => (x ? { ...x, schedule: r.schedule, compliance: r.compliance } : x))).catch(() => {})
-  } })
+  const planSheet = () => scheduleSheet({ linkId, name: res.name, schedule: res.schedule, onSaved: refresh })
   const view = useMemo(() => res && clientView(res.data), [res])
   const tabs = res ? SECTIONS.filter(s => res.grants[s.key]) : []
   const back = () => nav('/trainer')
@@ -151,7 +157,7 @@ export default function TrainerClient() {
       <div role="alert" className="small" style={{ color: 'var(--red)', marginBottom: 12, lineHeight: 1.4 }}>{error}</div>
       <button className="btn" onClick={() => { useUI.getState().toast('Доступ закрыт'); back() }}>К списку</button>
     </>}
-    {res && settings && <ClientSettings res={res} linkId={linkId} onDone={back} />}
+    {res && settings && <ClientSettings res={res} linkId={linkId} onDone={back} onPause={refresh} />}
     {res && !settings && <>
       <ComplianceBlock compliance={res.compliance} onSchedule={planSheet} />
       {tabs.length > 1 && <Segmented className="seg-range" value={tab} onChange={setTab} options={tabs.map(s => ({ value: s.key, label: s.short }))} />}

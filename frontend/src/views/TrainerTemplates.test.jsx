@@ -394,3 +394,24 @@ describe('a repeat and a partial failure (review fixes)', () => {
     expect(useUI.getState().toastMsg).toContain('Пропущено 1 упражнение')
   })
 })
+
+describe('review: the card on a small screen', () => {
+  it('keeps the routines in a scrolling box above the buttons, and cuts a long exercise line to one line', async () => {
+    mocks.api.mockImplementation(route())
+    const host = mount(); await flush()
+    click([...host.querySelectorAll('.item')].find(x => x.textContent.includes('Тяни-Толкай')))
+    await flush()
+    const { host: s } = sheet()
+    await flush()
+    const body = s.querySelector('.tpl-body')
+    expect(body).toBeTruthy()
+    expect(body.textContent).toContain('Тяни')
+    expect(s.querySelectorAll('.tpl-body button').length).toBeGreaterThan(0)
+    // the buttons are outside the scrolling box
+    expect(body.contains(button(s, 'Закрыть'))).toBe(false)
+    expect(body.contains(button(s, 'Назначить'))).toBe(false)
+    const lines = [...body.querySelectorAll('.small.dim')]
+    expect(lines.length).toBeGreaterThan(0)
+    for (const l of lines) { expect(l.style.whiteSpace).toBe('nowrap'); expect(l.style.textOverflow).toBe('ellipsis'); expect(l.title).toBe(l.textContent) }
+  })
+})

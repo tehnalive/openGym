@@ -1,7 +1,7 @@
 // The data of a client without Telegram (TG14, managed clients): the note, a copy to download, deleting the
 // diary. The diary itself is the ordinary app, opened in the client's name from the cabinet
 // (lib/managed-mode.js); nothing is recorded here. Russian only.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText, clientView } from '../lib/trainer.js'
@@ -23,17 +23,23 @@ export default function TrainerManaged() {
   const [res, setRes] = useState(null)
   const [error, setError] = useState('')
 
+  // Only the newest answer counts: a slow reply to an older read must not put old numbers back.
+  const seq = useRef(0)
   useEffect(() => {
     let gone = false
+    const n = ++seq.current
     setRes(null); setError('')
-    trainerApi.managed(linkId).then(r => { if (!gone) setRes(r) }).catch(e => { if (!gone) setError(errorText(e)) })
+    trainerApi.managed(linkId).then(r => { if (!gone && n === seq.current) setRes(r) }).catch(e => { if (!gone && n === seq.current) setError(errorText(e)) })
     return () => { gone = true }
   }, [linkId])
+  // After a pause, a lifted pause or a new schedule the percentages change: read the client again.
+  const refresh = () => {
+    const n = ++seq.current
+    trainerApi.managed(linkId).then(r => { if (n === seq.current) setRes(x => (x ? { ...x, schedule: r.schedule, compliance: r.compliance, pause: r.pause } : x)) }).catch(() => {})
+  }
   const back = () => nav('/trainer')
   // A new schedule changes the plan the percentages are counted against: read them again.
-  const planSheet = () => scheduleSheet({ linkId, name: res.name, schedule: res.schedule, onSaved: () => {
-    trainerApi.managed(linkId).then(r => setRes(x => (x ? { ...x, schedule: r.schedule, compliance: r.compliance } : x))).catch(() => {})
-  } })
+  const planSheet = () => scheduleSheet({ linkId, name: res.name, schedule: res.schedule, onSaved: refresh })
   const counts = res ? (() => { const v = clientView(res.data); return `${v.workouts.length} трен., ${v.bodyweight.length} взвеш., ${v.measurements.length} замеров` })() : ''
 
   const exportData = async () => {
@@ -73,7 +79,7 @@ export default function TrainerManaged() {
       </div>
       <ComplianceBlock compliance={res.compliance} onSchedule={planSheet} />
       <button className="btn primary" style={{ marginBottom: 12 }} onClick={() => openManagedDiary(res.linkId || linkId, res.name)}>Открыть дневник</button>
-      <ClientLifecycle linkId={linkId} name={res.name} pause={res.pause} onArchived={back} />
+      <ClientLifecycle linkId={linkId} name={res.name} pause={res.pause} onPause={refresh} onArchived={back} />
       {/* Its routines: to the templates, or copied to other clients (TRAINER_MODE.md section 17). */}
       <ManagedRoutines linkId={res.linkId || linkId} />
       <div className="dim small" style={{ margin: '14px 0 8px', lineHeight: 1.4 }}>

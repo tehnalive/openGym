@@ -323,3 +323,82 @@ describe('review of the pause and archive screens', () => {
     expect(host.textContent).toMatch(/В архиве с 4 нояб/)
   })
 })
+
+describe('review: the tiles follow the pause, the chips read as written', () => {
+  const WIN = (done, planned) => ({ pct: planned ? Math.round(100 * done / planned) : null, done, planned, workouts: done })
+  const COMP = (n, extra = {}) => ({ hasSchedule: true, d7: WIN(n, 4), d30: WIN(n, 8), d90: WIN(n, 12), ...extra })
+  const managed = comp => ({ linkId: 'link-mmmm-1', name: 'Мама', note: '', managed: true, rev: 1, pause: null, compliance: comp, data: { unit: 'kg', workouts: [], bodyweight: [], measurements: [] } })
+  const tiles = host => [...host.querySelectorAll('[aria-label="Соблюдение плана"] [role=group]')].map(g => g.getAttribute('aria-label'))
+
+  it('reads the numbers again after a pause and after lifting it, and the last answer wins over a late old one', async () => {
+    const gets = []   // each read of the client waits for the test to answer it
+    mocks.api.mockImplementation((path, init) => {
+      const key = (init?.method || 'GET') + ' ' + path
+      if (key === 'GET /api/trainer/managed/link-mmmm-1') return new Promise(r => gets.push(r))
+      if (key.startsWith('PUT /api/trainer/links/link-mmmm-1/pause')) return Promise.resolve({ pause: { since: 'x', until: null, reason: 'Отпуск' } })
+      if (key.startsWith('DELETE /api/trainer/links/link-mmmm-1/pause')) return Promise.resolve({ pause: null })
+      return Promise.reject(Object.assign(new Error('nope'), { status: 404 }))
+    })
+    const host = mount('/trainer/m/link-mmmm-1')
+    await flush()
+    await act(async () => { gets[0](managed(COMP(1))); await new Promise(r => setTimeout(r, 0)) })
+    expect(tiles(host)[0]).toContain('выполнено 1 из 4')
+    // a pause: its own read is slow
+    const card = () => host.querySelector('[aria-label="Пауза"]')
+    click(button(card(), 'Отпуск')); click(button(card(), 'Без срока'))
+    await flush()
+    expect(gets).toHaveLength(2)
+    // the pause is lifted while that read is still in flight; this read is quick
+    click(button(card(), 'Снять паузу'))
+    await flush()
+    expect(gets).toHaveLength(3)
+    await act(async () => { gets[2](managed(COMP(3))); await new Promise(r => setTimeout(r, 0)) })
+    expect(tiles(host)[0]).toContain('выполнено 3 из 4')
+    // the old answer comes late and is ignored
+    await act(async () => { gets[1](managed(COMP(2, { }))); await new Promise(r => setTimeout(r, 0)) })
+    expect(tiles(host)[0]).toContain('выполнено 3 из 4')
+    expect(tiles(host)[1]).toContain('выполнено 3 из 8')
+  })
+
+  it('does the same on the screen of a client with Telegram', async () => {
+    let n = 1
+    mocks.api.mockImplementation(route({
+      'GET /api/trainer/clients/link-aaaa-1/data': () => ({ linkId: 'link-aaaa-1', name: 'Вася', since: '2026-10-01T00:00:00Z', grants: G, pause: n === 2 ? { since: 'x', until: null } : null, compliance: COMP(n), data: { unit: 'kg', workouts: [], customEx: [] } }),
+      'PUT /api/trainer/links/link-aaaa-1/pause': () => { n = 2; return { pause: { since: 'x', until: null } } },
+      'DELETE /api/trainer/links/link-aaaa-1/pause': () => { n = 3; return { pause: null } },
+    }))
+    const host = mount('/trainer/link-aaaa-1')
+    await flush()
+    expect(tiles(host)[0]).toContain('выполнено 1 из 4')
+    click(host.querySelector('[aria-label="Настройки"]'))
+    click(button(host.querySelector('[aria-label="Пауза"]'), 'Без срока'))
+    await flush()
+    click(host.querySelector('[aria-label="Назад"]'))
+    expect(tiles(host)[0]).toContain('выполнено 2 из 4')
+    click(host.querySelector('[aria-label="Настройки"]'))
+    click(button(host.querySelector('[aria-label="Пауза"]'), 'Снять паузу'))
+    await flush()
+    click(host.querySelector('[aria-label="Назад"]'))
+    expect(tiles(host)[0]).toContain('выполнено 3 из 4')
+  })
+
+  it('wraps the chips, keeps the text as written, and forgets the reason after lifting the pause', async () => {
+    mocks.api.mockImplementation(route({
+      'GET /api/trainer/managed/link-mmmm-1': managed(COMP(1)),
+      'PUT /api/trainer/links/link-mmmm-1/pause': { pause: { since: 'x', until: null, reason: 'Травма' } },
+      'DELETE /api/trainer/links/link-mmmm-1/pause': { pause: null },
+    }))
+    const host = mount('/trainer/m/link-mmmm-1')
+    await flush()
+    const card = host.querySelector('[aria-label="Пауза"]')
+    for (const g of card.querySelectorAll('.chips')) expect(g.classList.contains('wrap')).toBe(true)
+    for (const c of card.querySelectorAll('.chip')) expect(c.classList.contains('nocap')).toBe(true)
+    expect(button(card, 'Без причины')).toBeTruthy(); expect(button(card, '1 неделя')).toBeTruthy()
+    click(button(card, 'Травма')); click(button(card, 'Без срока'))
+    await flush()
+    click(button(card, 'Снять паузу'))
+    await flush()
+    expect(button(card, 'Травма').getAttribute('aria-pressed')).toBe('false')
+    expect(button(card, 'Без причины').getAttribute('aria-pressed')).toBe('true')
+  })
+})

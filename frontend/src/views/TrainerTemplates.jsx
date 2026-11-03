@@ -120,7 +120,8 @@ export function TemplateCard({ id, close, onChanged }) {
     <h3>{tpl.name}</h3>
     {tpl.note && <div className="dim small" style={{ marginBottom: 8, lineHeight: 1.4 }}>{tpl.note}</div>}
     <div className="dim small" style={{ marginBottom: 10 }}>{compositionLine(tpl.routines.map(r => r.name), 6)}</div>
-    <div style={{ marginBottom: 12 }}>
+    {/* the list scrolls inside the sheet, so the buttons below stay on the screen */}
+    <div className="tpl-body" style={{ marginBottom: 12 }}>
       {tpl.routines.map((r, i) => <div key={r.id} style={{ padding: '8px 0', borderTop: i ? '1px solid var(--sep)' : 'none' }}>
         <div className="row between" style={{ gap: 8 }}>
           <div className="tt" style={{ fontSize: 15, flex: 1 }}>{r.name}</div>
@@ -129,7 +130,7 @@ export function TemplateCard({ id, close, onChanged }) {
           <button className="iconbtn" aria-label={'Убрать из шаблона: ' + r.name} disabled={busy || tpl.routines.length < 2} title={tpl.routines.length < 2 ? 'В шаблоне должна остаться хотя бы одна рутина' : 'Убрать из шаблона'}
             onClick={() => takeOut(r.id)}><Icon name="trash" /></button>
         </div>
-        {(r.ex || []).map((e, k) => <div key={k} className="small dim" style={{ lineHeight: 1.4 }}>{exerciseLine(tpl, e, tpl.unit)}</div>)}
+        {(r.ex || []).map((e, k) => <div key={k} className="small dim" title={exerciseLine(tpl, e, tpl.unit)} style={{ lineHeight: 1.4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{exerciseLine(tpl, e, tpl.unit)}</div>)}
       </div>)}
     </div>
     {error && <div role="alert" className="small" style={{ color: 'var(--red)', marginBottom: 12, lineHeight: 1.4 }}>{error}</div>}

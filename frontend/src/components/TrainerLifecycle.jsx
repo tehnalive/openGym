@@ -28,7 +28,7 @@ export default function ClientLifecycle({ linkId, name, pause: initial = null, o
   }
   const resume = async () => {
     setBusy(true); setError('')
-    try { await trainerApi.resume(linkId); setPause(null); onPause?.(null); toast('Пауза снята') }
+    try { await trainerApi.resume(linkId); setPause(null); setReason(''); onPause?.(null); toast('Пауза снята') }
     catch (e) { setError(errorText(e)) }
     finally { setBusy(false) }
   }
@@ -51,13 +51,13 @@ export default function ClientLifecycle({ linkId, name, pause: initial = null, o
           : 'Отпуск, травма, болезнь. Место за подопечным, доступ к данным остаётся, напоминания о занятиях не приходят.'}
       </div>
       <div className="dim small" style={{ marginBottom: 4 }}>Причина</div>
-      <div className="chips" role="group" aria-label="Причина паузы">
-        {[...PAUSE_REASONS, ''].map(r => <button key={r || 'none'} type="button" aria-pressed={reason === r} className={'chip' + (reason === r ? ' on' : '')}
+      <div className="chips wrap" role="group" aria-label="Причина паузы">
+        {[...PAUSE_REASONS, ''].map(r => <button key={r || 'none'} type="button" aria-pressed={reason === r} className={'chip nocap' + (reason === r ? ' on' : '')}
           onClick={() => setReason(r)}>{r || 'Без причины'}</button>)}
       </div>
       <div className="dim small" style={{ margin: '10px 0 4px' }}>{pause ? 'Изменить срок' : 'На какой срок'}</div>
-      <div className="chips" role="group" aria-label="Срок паузы">
-        {PAUSE_PRESETS.map(p => <button key={p.label} type="button" className="chip" disabled={busy} onClick={() => set(p.days)}>{p.label}</button>)}
+      <div className="chips wrap" role="group" aria-label="Срок паузы">
+        {PAUSE_PRESETS.map(p => <button key={p.label} type="button" className="chip nocap" disabled={busy} onClick={() => set(p.days)}>{p.label}</button>)}
       </div>
       {pause && <button className="btn primary" style={{ marginTop: 12 }} disabled={busy} onClick={resume}>Снять паузу</button>}
       {error && <div role="alert" className="small" style={{ color: 'var(--red)', margin: '8px 0 0', lineHeight: 1.4 }}>{error}</div>}

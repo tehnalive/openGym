@@ -96,4 +96,14 @@ describe('exportFile', () => {
     const read = await readBackupFile(new File([exportFile({ name: 'Дед', data }).text], 'd.json', { type: 'application/json' }))
     expect(read.state.workouts).toHaveLength(1)
   })
+
+  it('the routines of the diary are in the file and the import takes them', async () => {
+    const data = { unit: 'kg', workouts: [], routines: [{ id: 'r1', name: 'Ноги', ex: [{ id: 'squat', sets: 3 }] }] }
+    const text = exportFile({ name: 'Дед', data }).text
+    expect(JSON.parse(text).routines).toEqual(data.routines)
+    const { readBackupFile } = await import('./backup-media.js')
+    const read = await readBackupFile(new File([text], 'd.json', { type: 'application/json' }))
+    expect(read.state.routines).toHaveLength(1)
+    expect(read.state.routines[0].name).toBe('Ноги')
+  })
 })

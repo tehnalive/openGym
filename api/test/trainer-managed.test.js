@@ -308,7 +308,7 @@ test('applyOps is pure: the input is not changed, and checkCreate trims control 
   assert.equal(checkCreate({ name: 'А\u0000\nБ', ageConfirmed: true }).name, 'А Б');
   assert.equal(hasDiary({ workouts: [] }), false); assert.equal(hasDiary({ bodyweight: [{ d: TODAY, w: 1 }] }), true);
   assert.deepEqual(Object.keys(managedView({ dayPhotos: { x: 1 }, coach: { chat: ['x'] }, workouts: [] })).sort(),
-    ['bodyweight', 'customEx', 'customMeasurements', 'measurementEnabled', 'measurements', 'unit', 'weekStart', 'workouts']);
+    ['bodyweight', 'customEx', 'customMeasurements', 'measurementEnabled', 'measurements', 'routines', 'unit', 'weekStart', 'workouts']);
 });
 
 // ---- the whole document, for the ordinary app opened in the client's name ----
@@ -492,6 +492,15 @@ test('the export keeps the mark (and not the trainer\'s id), so an imported copy
   assert.ok(!ex.text.includes(who.coach.id), 'no profile ids in the export');
   assert.equal(managedExport('x', { workouts: [{ id: 1, via: 'coach', by: 'u' }] }).data.workouts[0].by, undefined);
   assert.equal(managedView({ workouts: [{ id: 1, via: 'coach' }] }).workouts[0].via, 'coach');
+});
+
+test('the export carries the routines of the diary, without bookkeeping, media or the trainer id', () => {
+  const S = { routines: [{ id: 'r1', name: 'Ноги', ex: [{ id: 'squat', sets: 3 }], _ts: 5, _f: { name: 5 }, _u: 'x', by: 'coach-uid', photo: 'p.jpg' }, 'junk', null], workouts: [] };
+  const out = managedExport('x', S).data;
+  assert.equal(out.routines.length, 1);
+  assert.deepEqual(out.routines[0], { id: 'r1', name: 'Ноги', ex: [{ id: 'squat', sets: 3 }], _ts: 5 });
+  assert.ok(!JSON.stringify(out).includes('coach-uid'));
+  assert.deepEqual(managedExport('x', {}).data.routines, []);
 });
 
 // ---- the mark: review fixes ----

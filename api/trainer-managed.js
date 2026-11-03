@@ -255,6 +255,8 @@ export function managedView(S) {
     unit: doc.unit === 'lb' ? 'lb' : 'kg',
     weekStart: doc.weekStart === 0 ? 0 : 1,
     workouts: list(doc.workouts).filter(isRec).map(strip),
+    // The plan travels with the diary: the export is what the client loads into their own account.
+    routines: list(doc.routines).filter(isRec).map(strip),
     customEx: list(doc.customEx).filter(isRec).map(strip),
     bodyweight: list(doc.bodyweight).filter(isRec).map(strip),
     measurements: list(doc.measurements).filter(isRec).map(strip),

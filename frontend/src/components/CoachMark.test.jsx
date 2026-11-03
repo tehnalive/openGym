@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
 import CoachMark, { isCoachWorkout } from './CoachMark.jsx'
 import { WorkoutCard } from '../views/TrainerClient.jsx'
+import { WorkoutRow } from '../sheets.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -32,5 +33,14 @@ describe('CoachMark', () => {
     act(() => root.unmount()); host.remove()
     const own = { ...row, w: { id: 'w', entries: [] } }
     expect(draw(<WorkoutCard row={own} unit="kg" />).querySelector('[data-testid="coach-mark"]')).toBeNull()
+  })
+
+  it('in the history row the badge sits in the name column, under the date, not beside the PR badge', () => {
+    const w = { id: 'w', d: '2026-01-01', name: 'Ноги', start: 0, end: 0, via: 'coach', entries: [], prs: [{}] }
+    const row = draw(<WorkoutRow w={w} onClick={() => {}} />)
+    const mark = row.querySelector('[data-testid="coach-mark"]')
+    expect(mark.parentElement.classList.contains('grow')).toBe(true)
+    expect(mark.previousElementSibling.classList.contains('ss')).toBe(true)
+    expect(row.querySelector('.pr')).toBeTruthy()
   })
 })
