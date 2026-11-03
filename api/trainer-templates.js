@@ -53,19 +53,21 @@ function stripDeep(v, depth = 0) {
 
 const bad = (error, text, status = 400) => ({ error, text, status });
 
-/** One routine as a template keeps it, or an error. */
+export const UNNAMED_ROUTINE = 'Без названия';
+
+/** One routine as a template keeps it, or an error naming the routine. An entry of `ex` that is no exercise (no id) is left
+ *  out and counted in `dropped`; a routine with no name is called «Без названия». */
 export function cleanRoutine(raw) {
   if (!isRec(raw)) return bad('routine-invalid', 'Рутина записана неверно');
-  const name = plainText(raw.name, ROUTINE_NAME_MAX);
-  if (!name) return bad('routine-invalid', 'У рутины нет названия');
-  if (!Array.isArray(raw.ex) || raw.ex.length > ROUTINE_EX_MAX) return bad('routine-invalid', `В рутине до ${ROUTINE_EX_MAX} упражнений`);
+  const name = plainText(raw.name, ROUTINE_NAME_MAX) || UNNAMED_ROUTINE;
+  if (!Array.isArray(raw.ex)) return bad('routine-invalid', `Рутина «${name}» записана неверно: нет списка упражнений`);
+  if (raw.ex.length > ROUTINE_EX_MAX) return bad('routine-invalid', `В рутине «${name}» больше ${ROUTINE_EX_MAX} упражнений, шаблон их не вместит`);
   const r = stripDeep(raw);
   r.name = name;
   if (typeof r.id !== 'string' || !r.id || r.id.length > 64) r.id = newEntryId();
-  for (const e of r.ex) {
-    if (!isRec(e) || typeof e.id !== 'string' || !e.id || e.id.length > 100) return bad('routine-invalid', 'Упражнение в рутине записано неверно');
-  }
-  return { routine: r };
+  const before = r.ex.length;
+  r.ex = r.ex.filter(e => isRec(e) && typeof e.id === 'string' && e.id && e.id.length <= 100);
+  return { routine: r, dropped: before - r.ex.length };
 }
 
 /** One custom exercise as a template keeps it, or an error. */
@@ -80,34 +82,47 @@ export function cleanCustom(raw) {
 /** Ids of the exercises the routines use. */
 export const usedExerciseIds = routines => new Set(routines.flatMap(r => list(r.ex).map(e => e.id)));
 
+// The catalogue's ids are numbers (frontend lib/exercises.js, "0025", "5965"). Anything else is a custom exercise of the person's
+// own (a base-36 `uid()`, or an import's `im_...`), and the routines carry its definition in `customEx`.
+const isCatalogueId = id => /^\d{1,8}$/.test(id);
+
 /**
- * The cleaned content of a template from what the app sends: { routines, customEx }.
- * The custom exercises kept are only those a routine uses; routine ids are made unique.
+ * The cleaned content of a template from what the app sends: { routines, customEx, dropped }.
+ * The custom exercises kept are only those a routine uses; routine ids are made unique. An exercise that points at a custom
+ * exercise the list does not have (deleted since) or that is no exercise at all is left out and counted in `dropped`.
  */
 export function cleanContent(body) {
   const rawRoutines = list(body.routines);
   if (!Array.isArray(body.routines) || !rawRoutines.length) return bad('routines-required', 'Выберите хотя бы одну рутину');
   if (rawRoutines.length > TEMPLATE_ROUTINES_MAX) return bad('too-many-routines', `В шаблоне до ${TEMPLATE_ROUTINES_MAX} рутин`);
+  if (body.customEx !== undefined && body.customEx !== null && !Array.isArray(body.customEx)) return bad('custom-invalid', 'Свои упражнения записаны неверно');
   const routines = [];
   const seen = new Set();
+  let dropped = 0;
   for (const raw of rawRoutines) {
     const r = cleanRoutine(raw);
     if (r.error) return r;
+    dropped += r.dropped;
     if (seen.has(r.routine.id)) r.routine.id = newEntryId() + routines.length;
     seen.add(r.routine.id);
     routines.push(r.routine);
   }
-  if (body.customEx !== undefined && body.customEx !== null && !Array.isArray(body.customEx)) return bad('custom-invalid', 'Свои упражнения записаны неверно');
-  const used = usedExerciseIds(routines);
-  const customEx = [];
+  const defined = new Map();
   for (const raw of list(body.customEx)) {
-    if (!isRec(raw) || !used.has(raw.id) || customEx.some(c => c.id === raw.id)) continue;
+    if (!isRec(raw) || defined.has(raw.id)) continue;
     const c = cleanCustom(raw);
     if (c.error) return c;
-    customEx.push(c.custom);
-    if (customEx.length > CUSTOM_EX_MAX) return bad('custom-invalid', 'Слишком много своих упражнений');
+    defined.set(c.custom.id, c.custom);
   }
-  return { routines, customEx };
+  for (const r of routines) {
+    const kept = r.ex.filter(e => defined.has(e.id) || isCatalogueId(e.id));
+    dropped += r.ex.length - kept.length;
+    r.ex = kept;
+  }
+  const used = usedExerciseIds(routines);
+  const customEx = [...defined.values()].filter(c => used.has(c.id));
+  if (customEx.length > CUSTOM_EX_MAX) return bad('custom-invalid', 'Слишком много своих упражнений');
+  return { routines, customEx, dropped };
 }
 
 const unitOf = v => (v === 'lb' ? 'lb' : 'kg');
@@ -119,12 +134,12 @@ export function buildTemplate(body, now = Date.now()) {
   const name = plainText(body.name, TEMPLATE_NAME_MAX);
   if (!name) return bad('name-required', 'Назовите шаблон');
   if (body.note !== undefined && body.note !== null && typeof body.note !== 'string') return bad('bad-request', 'Заметка должна быть текстом');
-  const content = cleanContent(body);
+  const { dropped, ...content } = cleanContent(body);
   if (content.error) return content;
   const at = new Date(now).toISOString();
   const template = { id: newTemplateId(), name, note: plainText(body.note, TEMPLATE_NOTE_MAX), unit: unitOf(body.unit), ...content, createdAt: at, updatedAt: at };
   if (JSON.stringify(template).length > TEMPLATE_BYTES_MAX) return tooBig();
-  return { template };
+  return { template, dropped };
 }
 
 /**
@@ -206,21 +221,25 @@ export function copyContent(content, existing, { templateId = '', now = Date.now
   const toUnit = unitOf(existing.unit);
   const fromUnit = unitOf(content.unit);
   const have = list(existing.customEx).filter(isRec);
+  // An id is new against everything the diary holds and against what this copy has handed out already.
+  const usedIds = new Set([...list(existing.routines), ...have].filter(isRec).map(x => x.id));
+  const fresh = () => { let id = newId(); while (usedIds.has(id)) id = newId(); usedIds.add(id); return id; };
   const idMap = new Map();
   const addedCustom = [];
   for (const c of list(content.customEx)) {
     const same = have.concat(addedCustom).find(x => String(x.n || '').trim().toLowerCase() === String(c.n || '').trim().toLowerCase() && (x.bp || '') === (c.bp || ''));
     if (same) { idMap.set(c.id, same.id); continue; }
-    const id = newId();
+    const id = fresh();
     idMap.set(c.id, id);
-    addedCustom.push({ ...clone(c), id, custom: true, _ts: now });
+    // As the app stores one made by hand (lib/plan-share.js mergePlan): `custom`, and `sm` mirroring the secondaries.
+    addedCustom.push({ ...clone(c), id, custom: true, ...(Array.isArray(c.secondaries) && c.secondaries.length ? { sm: clone(c.secondaries) } : {}), _ts: now });
   }
   const taken = list(existing.routines).filter(isRec).map(r => r.name);
   const routines = [];
   for (const r of list(content.routines)) {
     const name = freeName(r.name, [...taken, ...routines.map(x => x.name)]);
     routines.push({
-      ...clone(r), id: newId(), name,
+      ...clone(r), id: fresh(), name,
       ...(templateId ? { fromTemplate: templateId } : {}),
       ex: list(r.ex).map(e => convertEx({ ...clone(e), id: idMap.get(e.id) || e.id }, fromUnit, toUnit)),
       _ts: now,
@@ -255,12 +274,50 @@ export function pushOffer(offers, offer) {
   return [...kept, offer].slice(-OFFERS_MAX);
 }
 
-/** What the client sees of an offer: the composition, and everything the app needs to add it. */
+/** The content without the notes of its routines and exercises: what a trainer wrote about one client is not handed to another. */
+export function withoutNotes(content) {
+  const out = clone(content);
+  for (const r of list(out.routines)) {
+    delete r.note;
+    for (const e of list(r.ex)) delete e.note;
+  }
+  return out;
+}
+
+/** What the client sees of an offer in the list: who, what, when. The routines come with the offer itself. */
+export const offerSummary = (o, coachName) => ({
+  id: o.id, templateName: o.templateName, coachName, routineNames: o.routines.map(r => r.name), at: o.at,
+});
+
+/** The whole offer: the composition, and everything the app needs to add it. */
 export const offerView = o => ({
   id: o.id, templateName: o.templateName, unit: unitOf(o.unit), at: o.at,
   routineCount: o.routines.length, routineNames: o.routines.map(r => r.name),
   routines: o.routines, customEx: o.customEx || [],
 });
+
+// ---- a repeated request: the same `requestId` on the same link answers what it answered, writing nothing ----
+// The app makes one id per opened sheet. A lost answer then costs a retry, not a second «Тяни (2)». The link keeps the last
+// ASSIGN_KEYS_MAX results for ASSIGN_KEYS_TTL_MS; an error is not kept, so a retry of what failed does try again.
+export const ASSIGN_KEYS_MAX = 20;
+export const ASSIGN_KEYS_TTL_MS = 24 * 3600 * 1000;
+export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+/** The request id of a body: '' when it has none, null when it is not one. */
+export const requestIdOf = raw => (raw === undefined || raw === null || raw === '' ? '' : typeof raw === 'string' && REQUEST_ID_RE.test(raw) ? raw : null);
+
+/** The result this link already gave for `key` handed over as `scope` (a template, or a copy of named routines), or null. */
+export function seenResult(link, key, scope, now = Date.now()) {
+  if (!key) return null;
+  const hit = list(link && link.assigned).find(a => isRec(a) && a.key === key && a.scope === scope && now - a.at < ASSIGN_KEYS_TTL_MS);
+  return hit ? clone(hit.result) : null;
+}
+
+/** `assigned` of a link with the new result added: old ones past their time go, the newest ASSIGN_KEYS_MAX stay. */
+export function rememberResult(assigned, key, scope, result, now = Date.now()) {
+  const kept = list(assigned).filter(a => isRec(a) && now - a.at < ASSIGN_KEYS_TTL_MS && !(a.key === key && a.scope === scope));
+  return [...kept, { key, scope, at: now, result: clone(result) }].slice(-ASSIGN_KEYS_MAX);
+}
 
 // ---- the file store: DATA_DIR/trainer-templates-<uid>.json, written temp-then-rename ----
 export const templatesFile = (dir, uid) => path.join(dir, `trainer-templates-${uid}.json`);

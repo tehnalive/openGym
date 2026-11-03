@@ -189,7 +189,9 @@ describe('a template card', () => {
     expect(s.textContent).toContain('Придёт предложение, подопечный примет сам')
     click(check(s, 'Иван')); click(check(s, 'Мария'))
     click([...s.querySelectorAll('button')].filter(b => b.textContent === 'Назначить').at(-1)); await flush()
-    expect(body('POST', '/api/trainer/templates/tpl-aaaa-1/assign')).toEqual({ linkIds: ['link-mmmm-1', 'link-tttt-2'] })
+    const sent = body('POST', '/api/trainer/templates/tpl-aaaa-1/assign')
+    expect(sent.linkIds).toEqual(['link-mmmm-1', 'link-tttt-2'])
+    expect(sent.requestId).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
     expect(s.textContent).toContain('Добавлено: Иван. Отправлено предложение: Мария.')
   })
 
@@ -293,7 +295,9 @@ describe('the routines of a client without Telegram (the cabinet data screen)', 
     expect(check(s, 'Иван')).toBeNull()
     click(check(s, 'Мария'))
     click(button(s, 'Скопировать')); await flush()
-    expect(body('POST', '/api/trainer/managed/link-mmmm-1/routines/copy')).toEqual({ routineIds: ['m1'], toLinkIds: ['link-tttt-2'] })
+    const sent = body('POST', '/api/trainer/managed/link-mmmm-1/routines/copy')
+    expect(sent).toMatchObject({ routineIds: ['m1'], toLinkIds: ['link-tttt-2'] })
+    expect(sent.requestId).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
     expect(s.textContent).toContain('Отправлено предложение: Мария.')
   })
 
@@ -303,5 +307,90 @@ describe('the routines of a client without Telegram (the cabinet data screen)', 
     act(() => { mounted.splice(0).forEach(r => r.unmount()) })
     const other = await setup({ 'GET /api/trainer/managed/link-mmmm-1/routines': () => { throw Object.assign(new Error('x'), { status: 404, data: { error: 'Подопечный недоступен' } }) } })
     expect(other.textContent).toContain('Подопечный недоступен')
+  })
+})
+
+describe('a repeat and a partial failure (review fixes)', () => {
+  const assignGoes = results => route({
+    'POST /api/trainer/templates/tpl-aaaa-1/assign': results,
+    'POST /api/trainer/managed/link-mmmm-1/routines/copy': results,
+    'GET /api/trainer/managed/link-mmmm-1': { linkId: 'link-mmmm-1', name: 'Мама', note: '', managed: true, rev: 1, data: { unit: 'kg', workouts: [], bodyweight: [], measurements: [], customEx: [] } },
+    'GET /api/trainer/managed/link-mmmm-1/routines': { routines: [{ id: 'm1', name: 'Мамина', exerciseCount: 4 }] },
+  })
+  const openCard = async () => {
+    const host = mount(); await flush()
+    click(host.querySelector('.item'))
+    const opened = sheet(); await flush()
+    click(button(opened.host, 'Назначить')); await flush()
+    return opened
+  }
+  const sendButton = s => [...s.querySelectorAll('button')].filter(b => /^(Назначить|Повторить для выбранных)$/.test(b.textContent)).at(-1)
+
+  it('keeps one request id for the sheet, and after a partial failure sends only the failed client again with the same id', async () => {
+    let n = 0
+    mocks.api.mockImplementation((path, init) => {
+      if (path === '/api/trainer/templates/tpl-aaaa-1/assign') {
+        n++
+        return Promise.resolve(n === 1
+          ? { ok: true, results: [{ linkId: 'link-mmmm-1', result: 'added', routineCount: 2 }, { linkId: 'link-tttt-2', result: 'error', code: 'write-failed' }] }
+          : { ok: true, results: [{ linkId: 'link-tttt-2', result: 'offered' }] })
+      }
+      return route()(path, init)
+    })
+    const { host: s } = await openCard()
+    click(check(s, 'Иван')); click(check(s, 'Мария'))
+    click(sendButton(s)); await flush()
+    expect(s.textContent).toContain('Добавлено: Иван.')
+    expect(s.querySelector('[role=alert]').textContent).toBe('Не получилось: Мария (не удалось записать).')
+    expect(check(s, 'Иван').getAttribute('aria-checked')).toBe('false')
+    expect(check(s, 'Мария').getAttribute('aria-checked')).toBe('true')
+    expect(sendButton(s).textContent).toBe('Повторить для выбранных')
+    click(sendButton(s)); await flush()
+    const sent = mocks.api.mock.calls.filter(([p]) => p === '/api/trainer/templates/tpl-aaaa-1/assign').map(([, i]) => JSON.parse(i.body))
+    expect(sent.map(b => b.linkIds)).toEqual([['link-mmmm-1', 'link-tttt-2'], ['link-tttt-2']])
+    expect(sent[0].requestId).toBe(sent[1].requestId)
+    expect(s.textContent).toContain('Отправлено предложение: Мария.')
+  })
+
+  it('a pressed-again button after a lost answer sends the same request id', async () => {
+    let n = 0
+    mocks.api.mockImplementation((path, init) => {
+      if (path === '/api/trainer/templates/tpl-aaaa-1/assign') { n++; return n === 1 ? Promise.reject(Object.assign(new Error('offline'), { status: 0 })) : Promise.resolve({ ok: true, results: [{ linkId: 'link-mmmm-1', result: 'added' }] }) }
+      return route()(path, init)
+    })
+    const { host: s } = await openCard()
+    click(check(s, 'Иван'))
+    click(sendButton(s)); await flush()
+    expect(s.querySelector('[role=alert]')).toBeTruthy()
+    click(sendButton(s)); await flush()
+    const sent = mocks.api.mock.calls.filter(([p]) => p === '/api/trainer/templates/tpl-aaaa-1/assign').map(([, i]) => JSON.parse(i.body))
+    expect(sent).toHaveLength(2); expect(sent[0].requestId).toBe(sent[1].requestId)
+    expect(s.textContent).toContain('Добавлено: Иван.')
+  })
+
+  it('says how many exercises were left out when copying', async () => {
+    mocks.api.mockImplementation(assignGoes({ ok: true, results: [{ linkId: 'link-tttt-2', result: 'offered' }], dropped: 2 }))
+    const host = mount('/trainer/m/link-mmmm-1'); await flush()
+    click(check(host, 'Мамина'))
+    click(button(host, 'Скопировать другому подопечному'))
+    const { host: s } = sheet(); await flush()
+    click(check(s, 'Мария'))
+    click(button(s, 'Скопировать')); await flush()
+    expect(s.textContent).toContain('Отправлено предложение: Мария.')
+    expect(s.textContent).toContain('Пропущено 2 упражнения')
+  })
+
+  it('says it too when a template is made from a client', async () => {
+    mocks.api.mockImplementation(route({
+      'GET /api/trainer/managed/link-mmmm-1': { linkId: 'link-mmmm-1', name: 'Мама', note: '', managed: true, rev: 1, data: { unit: 'kg', workouts: [], bodyweight: [], measurements: [], customEx: [] } },
+      'GET /api/trainer/managed/link-mmmm-1/routines': { routines: [{ id: 'm1', name: 'Мамина', exerciseCount: 4 }] },
+      'POST /api/trainer/templates/from-client/link-mmmm-1': { ok: true, template: TPL(), dropped: 1 },
+    }))
+    const host = mount('/trainer/m/link-mmmm-1'); await flush()
+    click(check(host, 'Мамина')); click(button(host, 'В шаблоны'))
+    const { host: s } = sheet()
+    type(field(s, 'Название шаблона'), 'От мамы')
+    click(button(s, 'Сохранить')); await flush()
+    expect(useUI.getState().toastMsg).toContain('Пропущено 1 упражнение')
   })
 })

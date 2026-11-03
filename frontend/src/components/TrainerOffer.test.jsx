@@ -138,16 +138,39 @@ describe('the offer sheet', () => {
 })
 
 describe('on opening the app', () => {
-  const me = offers => ({ consentVersion: 1, trainer: { enabled: false, limit: 5 }, asClient: { linkId: 'l1', coachName: 'Анна', grants: {}, consentAt: 'x', offers } })
+  // The list names the offers; each one's routines come from its own route.
+  const summary = o => ({ id: o.id, templateName: o.templateName, coachName: 'Анна', routineNames: o.routines.map(r => r.name), at: o.at })
+  const me = offers => ({ consentVersion: 1, trainer: { enabled: false, limit: 5 }, asClient: { linkId: 'l1', coachName: 'Анна', grants: {}, consentAt: 'x', offers: offers.map(summary) } })
+  const serve = (offers, extra) => mocks.api.mockImplementation(path => {
+    if (path === '/api/trainer/me') return Promise.resolve(me(offers))
+    const hit = offers.find(o => path === '/api/trainer/offers/' + o.id)
+    if (hit) return Promise.resolve({ offer: hit })
+    return extra ? extra(path) : Promise.resolve({ ok: true })
+  })
 
-  it('shows the waiting offer as a sheet', async () => {
-    mocks.api.mockResolvedValue(me([OFFER()]))
+  it('shows the waiting offer as a sheet, with the routines read from the offer itself', async () => {
+    serve([OFFER()])
+    act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
+    expect(useUI.getState().sheets).toHaveLength(1)
+    expect(calls('/api/trainer/offers/offer-0001')).toHaveLength(1)
+    const host = document.createElement('div'); document.body.appendChild(host)
+    const r2 = createRoot(host)
+    act(() => r2.render(useUI.getState().sheets[0].render(vi.fn())))
+    expect(host.textContent).toContain('2 рутины: Тяни, Толкай')
+    expect(host.textContent).toContain('Тяни-Толкай')
+    act(() => r2.unmount()); host.remove()
+  })
+
+  it('skips an offer taken back between the list and the read', async () => {
+    const two = [OFFER(), OFFER({ id: 'offer-0002', templateName: 'Ноги' })]
+    mocks.api.mockImplementation(path => path === '/api/trainer/me' ? Promise.resolve(me(two))
+      : path === '/api/trainer/offers/offer-0001' ? Promise.reject(Object.assign(new Error('gone'), { status: 404 })) : Promise.resolve({ offer: two[1] }))
     act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
     expect(useUI.getState().sheets).toHaveLength(1)
   })
 
-  it('does nothing while blocked, and asks only once', async () => {
-    mocks.api.mockResolvedValue(me([OFFER()]))
+  it('does nothing while blocked, and asks once per profile', async () => {
+    serve([OFFER()])
     act(() => root.render(<TrainerOfferGate blocked />)); await flush()
     expect(mocks.api).not.toHaveBeenCalled()
     act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
@@ -155,24 +178,108 @@ describe('on opening the app', () => {
     expect(calls('/api/trainer/me')).toHaveLength(1)
   })
 
+  it('asks again when another profile signs in under the same page', async () => {
+    serve([])
+    act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
+    expect(calls('/api/trainer/me')).toHaveLength(1)
+    act(() => { useStore.setState({ user: { id: 'u2', name: 'Олег' } }) }); await flush()
+    expect(calls('/api/trainer/me')).toHaveLength(2)
+    act(() => { useStore.setState({ user: { id: 'u2', name: 'Олег Ч.' } }) }); await flush()
+    expect(calls('/api/trainer/me')).toHaveLength(2)
+  })
+
+  it('does not open a sheet for a profile that is no longer signed in when the answers come', async () => {
+    let release
+    mocks.api.mockImplementation(path => path === '/api/trainer/me' ? Promise.resolve(me([OFFER()]))
+      : new Promise(res => { release = () => res({ offer: OFFER() }) }))
+    act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
+    act(() => { useStore.setState({ user: { id: 'u2', name: 'Олег' } }) })
+    await act(async () => { release(); await new Promise(r => setTimeout(r, 0)) })
+    expect(useUI.getState().sheets).toHaveLength(0)
+  })
+
   it('closes an offer already in the diary quietly, without a sheet or a second copy', async () => {
-    await (async () => { mocks.api.mockRejectedValue(Object.assign(new Error('offline'), { status: 0 })); await acceptOffer(OFFER()) })()
+    mocks.api.mockRejectedValue(Object.assign(new Error('offline'), { status: 0 })); await acceptOffer(OFFER())
     expect(S().routines).toHaveLength(3)
     mocks.api.mockReset()
-    mocks.api.mockImplementation(path => Promise.resolve(path === '/api/trainer/me' ? me([OFFER()]) : { ok: true }))
+    serve([OFFER()])
     act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
     expect(useUI.getState().sheets).toHaveLength(0)
     expect(calls('/api/trainer/offers/offer-0001/accept')).toHaveLength(1)
+    expect(calls('/api/trainer/offers/offer-0001')).toHaveLength(0)
     expect(S().routines).toHaveLength(3)
   })
 
   it('stays quiet without offers, and for someone who is not signed in through Telegram', async () => {
-    mocks.api.mockResolvedValue(me([]))
+    serve([])
     act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
     expect(useUI.getState().sheets).toHaveLength(0)
     act(() => root.unmount()); root = createRoot(box)
+    useStore.setState({ user: { id: 'u9', name: 'Другой' } })
     mocks.api.mockReset(); mocks.api.mockRejectedValue(Object.assign(new Error('no'), { status: 403 }))
     act(() => root.render(<TrainerOfferGate blocked={false} />)); await flush()
     expect(useUI.getState().sheets).toHaveLength(0)
+  })
+})
+
+describe('the profile an offer was opened for', () => {
+  it('writes nothing when another profile is signed in by the time the button is pressed', async () => {
+    mocks.api.mockResolvedValue({ ok: true })
+    useStore.setState({ user: { id: 'u2', name: 'Олег' } })
+    const r = await acceptOffer(OFFER(), 'u1')
+    expect(r).toMatchObject({ stale: true, added: 0 })
+    expect(S().routines).toHaveLength(1)
+    expect(mocks.api).not.toHaveBeenCalled()
+    expect(localStorage.getItem('gym_trainer_offers_added')).toBeNull()
+  })
+
+  it('the sheet closes without a write and says why', async () => {
+    mocks.api.mockResolvedValue({ ok: true })
+    const close = vi.fn()
+    act(() => root.render(<TrainerOffer coachName="Анна" offers={[OFFER()]} userId="u1" close={close} />))
+    useStore.setState({ user: { id: 'u2', name: 'Олег' } })
+    click(button(box, 'Добавить в мой план')); await flush()
+    expect(close).toHaveBeenCalled()
+    expect(S().routines).toHaveLength(1)
+    expect(useUI.getState().toastMsg).toContain('другой аккаунт')
+    expect(mocks.api).not.toHaveBeenCalled()
+  })
+})
+
+describe('an offer whose exercises this app does not know', () => {
+  const ALIEN = (over = {}) => OFFER({ id: 'offer-alien', customEx: [], routines: [{ id: 'x', name: 'Чужая', ex: [{ id: 'no-such-exercise-xyz', sets: 1 }] }], ...over })
+
+  it('adds nothing, is not remembered as added, and is still closed on the server', async () => {
+    mocks.api.mockResolvedValue({ ok: true })
+    const r = await acceptOffer(ALIEN())
+    expect(r).toMatchObject({ added: 0, dropped: 1, closed: true })
+    expect(S().routines).toHaveLength(1)
+    expect(localStorage.getItem('gym_trainer_offers_added')).toBeNull()
+    expect(calls('/api/trainer/offers/offer-alien/accept')).toHaveLength(1)
+  })
+
+  it('the sheet says nothing was added and why, and when only some were left out it says how many', async () => {
+    mocks.api.mockResolvedValue({ ok: true })
+    const close = vi.fn()
+    act(() => root.render(<TrainerOffer coachName="Анна" offers={[ALIEN()]} userId="u1" close={close} />))
+    click(button(box, 'Добавить в мой план')); await flush()
+    expect(useUI.getState().toastMsg).toBe('Ничего не добавлено: этих упражнений нет в вашей библиотеке.')
+    act(() => root.unmount()); root = createRoot(box)
+    const partial = OFFER({ id: 'offer-part', customEx: [], routines: [{ id: 'x', name: 'Часть', ex: [{ id: A, sets: 1 }, { id: 'no-such-exercise-xyz', sets: 1 }] }] })
+    act(() => root.render(<TrainerOffer coachName="Анна" offers={[partial]} userId="u1" close={close} />))
+    click(button(box, 'Добавить в мой план')); await flush()
+    expect(useUI.getState().toastMsg).toContain('Пропущено 1 упражнение')
+    expect(S().routines.map(r => r.name)).toContain('Часть')
+  })
+})
+
+describe('names in the diary', () => {
+  it('a routine named like one the person has gets a suffix, as when the server copies into a diary', async () => {
+    mocks.api.mockResolvedValue({ ok: true })
+    useStore.setState(st => ({ S: { ...st.S, routines: [{ id: 'own1', name: 'Тяни', ex: [] }, { id: 'own2', name: 'толкай (2)', ex: [] }] } }))
+    await acceptOffer(OFFER())
+    expect(S().routines.map(r => r.name)).toEqual(['Тяни', 'толкай (2)', 'Тяни (2)', 'Толкай'])
+    await acceptOffer(OFFER({ id: 'offer-0002' }))
+    expect(S().routines.map(r => r.name).slice(4)).toEqual(['Тяни (3)', 'Толкай (3)'])
   })
 })

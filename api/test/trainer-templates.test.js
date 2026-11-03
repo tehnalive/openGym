@@ -16,7 +16,7 @@ import {
 } from '../trainer-templates.js';
 
 // ---- pure ----
-const squat = (over = {}) => ({ id: 'squat', sets: 3, reps: 5, weight: 100, inc: 2.5, _ts: 5, ...over });
+const squat = (over = {}) => ({ id: '47311', sets: 3, reps: 5, weight: 100, inc: 2.5, _ts: 5, ...over });
 const routine = (over = {}) => ({ id: 'r1', name: 'Тяни', emoji: 'x', _ts: 1, _f: { name: 1 }, ex: [squat(), { id: 'c_mine', sets: 2, reps: 10, photo: 'h', media: { a: 1 } }], ...over });
 const custom = (over = {}) => ({ id: 'c_mine', n: 'Моё', bp: 'back', custom: true, _ts: 9, photo: 'h1', ...over });
 
@@ -37,11 +37,16 @@ test('a template needs a name and routines, within the limits', () => {
   assert.equal(buildTemplate({ name: 'a', routines: [] }).error, 'routines-required');
   assert.equal(buildTemplate({ name: 'a' }).error, 'routines-required');
   assert.equal(buildTemplate({ name: 'a', routines: Array.from({ length: TEMPLATE_ROUTINES_MAX + 1 }, (_, i) => routine({ id: 'r' + i })) }).error, 'too-many-routines');
-  assert.equal(buildTemplate({ name: 'a', routines: [{ id: 'r', name: '', ex: [] }] }).error, 'routine-invalid');
-  assert.equal(buildTemplate({ name: 'a', routines: [{ id: 'r', name: 'x', ex: [{ sets: 1 }] }] }).error, 'routine-invalid');
+  // No name is «Без названия»; an entry that is no exercise is left out and counted; too many exercises is a real refusal naming the routine.
+  const unnamed = buildTemplate({ name: 'a', routines: [{ id: 'r', name: '  ', ex: [{ sets: 1 }, { id: '4001', sets: 1 }] }] });
+  assert.equal(unnamed.template.routines[0].name, 'Без названия'); assert.equal(unnamed.template.routines[0].ex.length, 1); assert.equal(unnamed.dropped, 1);
+  const crowded = buildTemplate({ name: 'a', routines: [{ id: 'r', name: 'Толпа', ex: Array.from({ length: 61 }, (_, i) => ({ id: String(4000 + i) })) }] });
+  assert.equal(crowded.error, 'routine-invalid'); assert.match(crowded.text, /«Толпа»/);
+  assert.match(buildTemplate({ name: 'a', routines: [{ id: 'r', name: 'Без списка' }] }).text, /«Без списка»/);
+  assert.equal(buildTemplate({ name: 'a', routines: ['x'] }).error, 'routine-invalid');
   assert.equal(buildTemplate({ name: 'a', routines: [routine()], note: 5 }).error, 'bad-request');
   assert.equal(buildTemplate({ name: 'a'.repeat(100), routines: [routine()] }).template.name.length, 60);
-  const huge = routine({ ex: Array.from({ length: 60 }, (_, i) => ({ id: 'e' + i, note: 'я'.repeat(1500) })) });
+  const huge = routine({ ex: Array.from({ length: 60 }, (_, i) => ({ id: String(47400 + i), note: 'я'.repeat(1500) })) });
   const big = buildTemplate({ name: 'a', routines: [huge, { ...huge, id: 'r2' }, { ...huge, id: 'r3' }] });
   assert.equal(big.error, 'template-too-big'); assert.equal(big.status, 413);
   // The same id twice becomes two routines.
@@ -83,7 +88,7 @@ test('copies get new ids, a free name, the custom exercise under a new id, and a
   const mine = out.doc.customEx[0];
   assert.notEqual(mine.id, 'c_mine'); assert.equal(mine.n, 'Моё'); assert.equal(mine.custom, true);
   assert.equal(copy.ex[1].id, mine.id, 'the routine points at the new custom exercise');
-  assert.equal(copy.ex[0].id, 'squat', 'a catalogue exercise keeps its id');
+  assert.equal(copy.ex[0].id, '47311', 'a catalogue exercise keeps its id');
   assert.deepEqual(out.doc.workouts, [{ id: 'w' }]);
   // Again: the custom exercise is reused by name and body part, the routine is a third one.
   const again = addToDoc(out.doc, template, { templateId: template.id });
@@ -114,7 +119,7 @@ test('offers: the newest five stay, an offer of the same template replaces the o
   assert.deepEqual(offers.map(o => o.templateName), ['П2', 'П3', 'П5', 'П6', 'П4 новое']);
   const view = offerView(again);
   assert.equal(view.routineCount, 1); assert.deepEqual(view.routineNames, ['Тяни']); assert.ok(!('templateId' in view));
-  const huge = { routines: [routine({ ex: Array.from({ length: 60 }, (_, i) => ({ id: 'e' + i, note: 'я'.repeat(1200) })) })], customEx: [] };
+  const huge = { routines: [routine({ ex: Array.from({ length: 60 }, (_, i) => ({ id: String(47400 + i), note: 'я'.repeat(1200) })) })], customEx: [] };
   assert.ok(JSON.stringify(huge).length > OFFER_BYTES_MAX);
   assert.equal(buildOffer(huge, {}).error, 'offer-too-big');
 });
@@ -217,7 +222,7 @@ async function seedDiary(c, linkId, routines, customEx = []) {
 }
 const trainerRoutines = () => [
   routine({ id: 'tr1', name: 'Тяни', ex: [squat(), { id: 'c_mine', sets: 2, reps: 10 }] }),
-  routine({ id: 'tr2', name: 'Толкай', ex: [{ id: 'bench', sets: 3, reps: 8, weight: 60 }] }),
+  routine({ id: 'tr2', name: 'Толкай', ex: [{ id: '47312', sets: 3, reps: 8, weight: 60 }] }),
 ];
 const make = (c, over = {}) => c.post('/api/trainer/templates', { name: 'Тяни-Толкай', note: 'база', routines: trainerRoutines(), customEx: [custom()], ...over });
 
@@ -284,7 +289,7 @@ test('limits: fifty templates, twenty routines, 200 KB', async t => {
 test('a template over 200 KB is refused', async t => {
   const { who } = await world(t, ['coach']);
   await makeTrainer(who.coach);
-  const huge = routine({ ex: Array.from({ length: 60 }, (_, i) => ({ id: 'e' + i, note: 'я'.repeat(1500) })) });
+  const huge = routine({ ex: Array.from({ length: 60 }, (_, i) => ({ id: String(47400 + i), note: 'я'.repeat(1500) })) });
   const r = await who.coach.post('/api/trainer/templates', { name: 'x', routines: [huge, { ...huge, id: 'r2' }, { ...huge, id: 'r3' }] });
   assert.equal(r.status, 413); assert.equal(r.body.code, 'template-too-big');
 });
@@ -295,7 +300,7 @@ test('assigning to a client without Telegram adds independent copies with new id
   const link = await addManaged(who.coach);
   const uid = clientOfLink(app, link);
   const tpl = (await make(who.coach)).body.template;
-  const own = { id: 'mine1', name: 'Тяни', ex: [{ id: 'squat', sets: 1 }] };
+  const own = { id: 'mine1', name: 'Тяни', ex: [{ id: '47311', sets: 1 }] };
   await seedDiary(who.coach, link, [own]);
   const before = stateOf(app, uid);
 
@@ -358,10 +363,21 @@ test('a client with Telegram gets an offer, and their document is not written', 
   const me = (await who.c1.get('/api/trainer/me')).body.asClient;
   assert.equal(me.coachName, 'Анна');
   assert.equal(me.offers.length, 1);
-  const offer = me.offers[0];
+  // The list names the offer and nothing more; the routines come with the offer itself.
+  const listed = me.offers[0];
+  assert.deepEqual(Object.keys(listed).sort(), ['at', 'coachName', 'id', 'routineNames', 'templateName']);
+  assert.equal(listed.templateName, 'Тяни-Толкай'); assert.equal(listed.coachName, 'Анна'); assert.deepEqual(listed.routineNames, ['Тяни', 'Толкай']);
+  const full = await who.c1.get('/api/trainer/offers/' + listed.id);
+  assert.equal(full.status, 200, full.text);
+  const offer = full.body.offer;
   assert.equal(offer.templateName, 'Тяни-Толкай'); assert.equal(offer.routineCount, 2); assert.deepEqual(offer.routineNames, ['Тяни', 'Толкай']);
   assert.equal(offer.routines.length, 2); assert.deepEqual(offer.customEx.map(c => c.id), ['c_mine']);
   assert.ok(!('templateId' in offer));
+  // Only the client of the link reads it.
+  for (const c of [who.coach, app]) {
+    const r = c === app ? await app.call('/api/trainer/offers/' + listed.id) : await c.get('/api/trainer/offers/' + listed.id);
+    assert.ok(r.status === 404 || r.status === 401, r.text);
+  }
   // The trainer's own /me does not carry the offers, and neither does the list of clients.
   assert.ok(!JSON.stringify((await who.coach.get('/api/trainer/clients')).body).includes('offers'));
 
@@ -442,7 +458,7 @@ test('from a client: routines of a client without Telegram become a template; a 
   const link = await addManaged(who.coach, 'Мама');
   await seedDiary(who.coach, link, [
     { ...routine({ id: 'm1', name: 'Мамина', ex: [squat(), { id: 'c_x', sets: 1 }] }), by: 'zz' },
-    { id: 'm2', name: 'Вторая', ex: [{ id: 'bench', sets: 3 }] },
+    { id: 'm2', name: 'Вторая', ex: [{ id: '47312', sets: 3 }] },
   ], [custom({ id: 'c_x', n: 'Её' }), custom({ id: 'c_unused', n: 'Лишнее' })]);
   const names = await who.coach.get(`/api/trainer/managed/${link}/routines`);
   assert.deepEqual(names.body.routines, [{ id: 'm1', name: 'Мамина', exerciseCount: 2 }, { id: 'm2', name: 'Вторая', exerciseCount: 1 }]);
@@ -527,7 +543,7 @@ test('the audit log names the actions and never the content of a template', asyn
   await who.coach.del('/api/trainer/templates/' + tpl.id);
   const logs = fs.readdirSync(app.dir).filter(f => /^audit/.test(f)).map(f => fs.readFileSync(path.join(app.dir, f), 'utf8')).join('\n');
   for (const ev of ['trainer.template.create', 'trainer.template.update', 'trainer.template.assign', 'trainer.template.delete', 'trainer.offer.accept']) assert.ok(logs.includes(ev), ev);
-  for (const secret of ['Секретный шаблон', 'тайная заметка', 'Толкай', 'squat', 'c_mine']) assert.ok(!logs.includes(secret), secret);
+  for (const secret of ['Секретный шаблон', 'тайная заметка', 'Толкай', '47311', 'c_mine']) assert.ok(!logs.includes(secret), secret);
 });
 
 test('a managed write by assignment carries no "written by the trainer" mark on routines and keeps revisions consistent', async t => {
@@ -655,4 +671,156 @@ test('the "written by the trainer" mark and the revision rules hold across assig
   assert.equal(again.status, 200, again.text);
   assert.equal(stateOf(app, client).workouts[0].via, 'coach');
   assert.equal(stateOf(app, client).routines.length, 2);
+});
+
+// ---- review fixes (section 17.7) ----
+import { withoutNotes, requestIdOf, seenResult, rememberResult, ASSIGN_KEYS_MAX, ASSIGN_KEYS_TTL_MS, offerSummary } from '../trainer-templates.js';
+
+test('exercises that point at nothing are left out and counted; the numeric ids of the catalogue and defined custom ones stay', () => {
+  const r = cleanContent({
+    routines: [{ id: 'r', name: 'Р', ex: [{ id: '0025', sets: 1 }, { id: 'c_gone', sets: 1 }, { id: 'c_here', sets: 1 }, { id: 'im_x', sets: 1 }, { sets: 1 }] }],
+    customEx: [custom({ id: 'c_here' }), custom({ id: 'c_unused', n: 'Лишнее' })],
+  });
+  assert.deepEqual(r.routines[0].ex.map(e => e.id), ['0025', 'c_here']);
+  assert.equal(r.dropped, 3);
+  assert.deepEqual(r.customEx.map(c => c.id), ['c_here']);
+});
+
+test('copies never reuse an id the diary holds or one handed out in the same copy, even from a generator that repeats', () => {
+  const { template } = buildTemplate({ name: 'Т', routines: [routine({ id: 'a', name: 'А', ex: [{ id: 'c_mine', sets: 1 }] }), routine({ id: 'b', name: 'Б', ex: [{ id: 'c_mine', sets: 1 }] })], customEx: [custom()] });
+  const seq = ['held', 'held', 'dup', 'dup', 'dup', 'fresh'];
+  let n = 0;
+  const out = copyContent(template, { unit: 'kg', routines: [{ id: 'held', name: 'Х' }], customEx: [] }, { newId: () => seq.shift() ?? 'z' + (n++) });
+  const ids = [...out.routines.map(r => r.id), ...out.customEx.map(c => c.id)];
+  assert.equal(new Set(ids).size, ids.length, ids.join());
+  assert.ok(!ids.includes('held'), 'not the diary own id');
+  // An id that is a routine in the diary is not given to a custom exercise either.
+  const q = ['x1', 'x2', 'ok'];
+  const cx = copyContent({ routines: [], customEx: [custom()], unit: 'kg' }, { unit: 'kg', routines: [{ id: 'x1', name: 'Х' }], customEx: [{ id: 'x2' }] }, { newId: () => q.shift() });
+  assert.equal(cx.customEx[0].id, 'ok');
+});
+
+test('a custom exercise copied keeps the sm mirror of its secondaries, as the app stores one', () => {
+  const { template } = buildTemplate({ name: 'Т', routines: [routine({ ex: [{ id: 'c_mine', sets: 1 }] })], customEx: [custom({ secondaries: ['biceps'], primaries: ['lats'] })] });
+  const out = copyContent(template, { unit: 'kg', routines: [], customEx: [] });
+  assert.deepEqual(out.customEx[0].sm, ['biceps']); assert.deepEqual(out.customEx[0].secondaries, ['biceps']);
+  const plain = copyContent(buildTemplate({ name: 'Т', routines: [routine({ ex: [{ id: 'c_mine', sets: 1 }] })], customEx: [custom()] }).template, { unit: 'kg', routines: [], customEx: [] });
+  assert.ok(!('sm' in plain.customEx[0]));
+});
+
+test('notes of routines and exercises are taken off when routines go from one client on', () => {
+  const clean = withoutNotes({ routines: [{ id: 'r', name: 'Р', note: 'у неё колено', ex: [{ id: '0025', note: 'осторожно', sets: 1 }] }], customEx: [{ id: 'c', n: 'С', desc: 'описание' }] });
+  assert.ok(!JSON.stringify(clean.routines).includes('note')); assert.equal(clean.customEx[0].desc, 'описание');
+});
+
+test('request keys: valid ones only, kept per link for 24 hours and 20 results, scoped to what was handed over', () => {
+  assert.equal(requestIdOf(undefined), ''); assert.equal(requestIdOf('abcd1234'), 'abcd1234'); assert.equal(requestIdOf('short'), null); assert.equal(requestIdOf(5), null); assert.equal(requestIdOf('a b c d e f g h'), null);
+  const t0 = 1_000_000;
+  let list = rememberResult(undefined, 'key-00001', 't:x', { linkId: 'l', result: 'added' }, t0);
+  assert.deepEqual(seenResult({ assigned: list }, 'key-00001', 't:x', t0 + 1000), { linkId: 'l', result: 'added' });
+  assert.equal(seenResult({ assigned: list }, 'key-00001', 't:other', t0 + 1000), null, 'another template is another request');
+  assert.equal(seenResult({ assigned: list }, 'key-00002', 't:x', t0 + 1000), null);
+  assert.equal(seenResult({ assigned: list }, 'key-00001', 't:x', t0 + ASSIGN_KEYS_TTL_MS + 1), null, 'after a day it is forgotten');
+  assert.equal(seenResult({ assigned: list }, '', 't:x', t0), null);
+  for (let i = 0; i < ASSIGN_KEYS_MAX + 5; i++) list = rememberResult(list, 'key-' + String(i).padStart(5, '0'), 't:x', { n: i }, t0 + i);
+  assert.equal(list.length, ASSIGN_KEYS_MAX);
+  assert.equal(seenResult({ assigned: list }, 'key-00000', 't:x', t0 + 100), null, 'the oldest went');
+  assert.deepEqual(seenResult({ assigned: list }, 'key-00024', 't:x', t0 + 100), { n: 24 });
+  assert.deepEqual(offerSummary({ id: 'o', templateName: 'П', at: 'x', routines: [{ name: 'А' }, { name: 'Б' }] }, 'Анна'), { id: 'o', templateName: 'П', coachName: 'Анна', routineNames: ['А', 'Б'], at: 'x' });
+});
+
+test('the same request again changes nothing: a lost answer to Assign does not make a second copy', async t => {
+  const { app, who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const managed = await addManaged(who.coach, 'Иван');
+  const tg = await telegramClient(who.coach, who.c1);
+  const tpl = (await make(who.coach)).body.template;
+  const uid = clientOfLink(app, managed);
+  const assign = (extra = {}, ids = [managed, tg]) => who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: ids, ...extra });
+
+  assert.equal((await assign({ requestId: 'bad id!' })).status, 400);
+  const first = await assign({ requestId: 'request-0001' });
+  assert.deepEqual(first.body.results.map(r => r.result), ['added', 'offered']);
+  const bytes = fs.readFileSync(stateFile(app, uid), 'utf8');
+  const offersBefore = JSON.stringify(app.db().trainerLinks.find(l => l.id === tg).offers);
+
+  const again = await assign({ requestId: 'request-0001' });
+  assert.deepEqual(again.body.results, first.body.results, 'the same answer');
+  assert.equal(fs.readFileSync(stateFile(app, uid), 'utf8'), bytes, 'the diary is byte for byte what it was');
+  assert.equal(JSON.stringify(app.db().trainerLinks.find(l => l.id === tg).offers), offersBefore);
+  assert.equal(stateOf(app, uid).routines.length, 2);
+
+  // A new request is a new copy; a request id used for another template is not mistaken for this one.
+  assert.equal((await assign({ requestId: 'request-0002' })).body.results[0].result, 'added');
+  assert.deepEqual(stateOf(app, uid).routines.map(r => r.name), ['Тяни', 'Толкай', 'Тяни (2)', 'Толкай (2)']);
+  const other = (await make(who.coach, { name: 'Другой' })).body.template;
+  await who.coach.post(`/api/trainer/templates/${other.id}/assign`, { linkIds: [managed], requestId: 'request-0001' });
+  assert.equal(stateOf(app, uid).routines.length, 6);
+  // Without a key every press adds, as before.
+  await assign({}, [managed]);
+  assert.equal(stateOf(app, uid).routines.length, 8);
+
+  // An error is not kept: the failed one tries again with the same key, the one that worked is not repeated.
+  const mixed = await assign({ requestId: 'request-0003' }, [managed, 'nonexistent1']);
+  assert.deepEqual(mixed.body.results.map(r => r.result), ['added', 'error']);
+  const retry = await assign({ requestId: 'request-0003' }, [managed, 'nonexistent1']);
+  assert.deepEqual(retry.body.results, mixed.body.results);
+  assert.equal(stateOf(app, uid).routines.length, 10, 'added once');
+  assert.ok(app.db().trainerLinks.find(l => l.id === managed).assigned.length <= 20);
+});
+
+test('copying between clients is also safe to repeat, leaves out notes and dangling exercises, and says how many', async t => {
+  const { app, who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const a = await addManaged(who.coach, 'Первый'), b = await addManaged(who.coach, 'Второй');
+  await seedDiary(who.coach, a, [routine({ id: 'a1', name: 'Тяни', note: 'у него колено', ex: [{ ...squat(), note: 'осторожно' }, { id: 'c_gone', sets: 1 }, { id: 'c_mine', sets: 1 }] })], [custom()]);
+  const copy = body => who.coach.post(`/api/trainer/managed/${a}/routines/copy`, { routineIds: ['a1'], toLinkIds: [b], ...body });
+  const r1 = await copy({ requestId: 'copy-req-0001' });
+  assert.equal(r1.body.dropped, 1);
+  const r2 = await copy({ requestId: 'copy-req-0001' });
+  assert.deepEqual(r2.body.results, r1.body.results);
+  const doc = stateOf(app, clientOfLink(app, b));
+  assert.equal(doc.routines.length, 1);
+  assert.equal(doc.routines[0].ex.length, 2, 'the dangling exercise is not there');
+  assert.ok(!doc.routines[0].ex.some(e => e.id === 'c_gone'));
+  assert.ok(!JSON.stringify(doc.routines).includes('колено') && !JSON.stringify(doc.routines).includes('осторожно'), 'no notes travel');
+  assert.equal(stateOf(app, clientOfLink(app, a)).routines[0].note, 'у него колено', 'the source keeps its own');
+  assert.equal((await copy({ requestId: 'x' })).status, 400);
+});
+
+test('a template from a client: no name and a dangling exercise are not errors, and the answer says how many were left out', async t => {
+  const { who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const link = await addManaged(who.coach);
+  await seedDiary(who.coach, link, [{ id: 'n1', name: '', note: 'приватно', ex: [{ id: '47311', sets: 3, note: 'тоже' }, { id: 'c_deleted', sets: 1 }] },
+    { id: 'big', name: 'Огромная', ex: Array.from({ length: 61 }, (_, i) => ({ id: String(47400 + i), sets: 1 })) }]);
+  const made = await who.coach.post(`/api/trainer/templates/from-client/${link}`, { name: 'Шаблон', routineIds: ['n1'] });
+  assert.equal(made.status, 200, made.text);
+  assert.equal(made.body.template.routines[0].name, 'Без названия'); assert.equal(made.body.dropped, 1);
+  assert.deepEqual(made.body.template.routines[0].ex.map(e => e.id), ['47311']);
+  assert.ok(!JSON.stringify(made.body.template).includes('приватно') && !JSON.stringify(made.body.template).includes('тоже'));
+  const crowded = await who.coach.post(`/api/trainer/templates/from-client/${link}`, { name: 'Шаблон', routineIds: ['big'] });
+  assert.equal(crowded.status, 400); assert.equal(crowded.body.code, 'routine-invalid'); assert.match(crowded.body.error, /«Огромная»/);
+  // The trainer's own routines sent as a template count the same way.
+  const own = await who.coach.post('/api/trainer/templates', { name: 'Свой', routines: [{ id: 'z', name: 'З', ex: [{ id: '47311', sets: 1 }, { id: 'c_nowhere', sets: 1 }] }] });
+  assert.equal(own.body.dropped, 1);
+});
+
+test('an ended link keeps no offers; deleting a client account removes the link with them', async t => {
+  const { app, who } = await world(t, ['other', 'coach', 'c1', 'c2'], { env: { FIRST_USER_ADMIN: '1' } });
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  const l2 = await telegramClient(who.coach, who.c2);
+  const tpl = (await make(who.coach)).body.template;
+  await who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: [l1, l2], requestId: 'request-0001' });
+  const offerId = (await who.c1.get('/api/trainer/me')).body.asClient.offers[0].id;
+  assert.ok(app.db().trainerLinks.find(l => l.id === l1).offers.length);
+
+  assert.equal((await who.c1.del(`/api/trainer/links/${l1}`)).status, 200);
+  const ended = app.db().trainerLinks.find(l => l.id === l1);
+  assert.equal(ended.status, 'revoked'); assert.equal(ended.offers, undefined); assert.equal(ended.assigned, undefined);
+  assert.equal((await who.c1.get('/api/trainer/offers/' + offerId)).status, 404);
+
+  assert.equal((await who.other.post('/api/admin/user/delete', { id: who.c2.id })).status, 200);
+  assert.ok(!app.db().trainerLinks.some(l => l.id === l2), 'the link, and the offers on it, went with the account');
 });

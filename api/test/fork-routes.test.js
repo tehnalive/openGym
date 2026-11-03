@@ -45,7 +45,7 @@ for (const route of ['GET /api/trainer/me', 'PUT /api/trainer/me', 'POST /api/tr
   'PUT /api/trainer/links/{id}/pause', 'DELETE /api/trainer/links/{id}/pause', 'POST /api/trainer/links/{id}/archive', 'POST /api/trainer/links/{id}/restore',
   'GET /api/trainer/templates', 'POST /api/trainer/templates', 'POST /api/trainer/templates/from-client/{id}', 'GET /api/trainer/templates/{id}',
   'PUT /api/trainer/templates/{id}', 'DELETE /api/trainer/templates/{id}', 'POST /api/trainer/templates/{id}/assign',
-  'GET /api/trainer/managed/{id}/routines', 'POST /api/trainer/managed/{id}/routines/copy', 'POST /api/trainer/offers/{id}/accept', 'POST /api/trainer/offers/{id}/decline']) {
+  'GET /api/trainer/managed/{id}/routines', 'POST /api/trainer/managed/{id}/routines/copy', 'GET /api/trainer/offers/{id}', 'POST /api/trainer/offers/{id}/accept', 'POST /api/trainer/offers/{id}/decline']) {
   test(`trainer route ${route} exists and is documented`, () => {
     assert.ok(server.includes(`'${route}'`), `${route} missing from server.js`);
     const [method, path] = route.split(' ');
@@ -137,7 +137,7 @@ test('templates and offers (section 17): a client document is written only for a
   assert.ok(!/stateFile|atomicWrite|writeState|stateCache|commitState|readStateStrict/.test(telegramPart), 'a Telegram clients document is not touched');
   assert.match(telegramPart, /link\.offers = /);
   // The accept and decline routes only take an offer off the link.
-  const oStart = server.indexOf("'POST /api/trainer/offers/{id}/accept'");
+  const oStart = server.indexOf("'GET /api/trainer/offers/{id}'");
   const oEnd = server.indexOf("'GET /api/trainer/clients'");
   assert.ok(oStart > 0 && oEnd > oStart);
   assert.ok(!/stateFile|atomicWrite|writeState|stateCache|commitState|readStateStrict/.test(server.slice(oStart, oEnd)), 'an offer route touches a state file');

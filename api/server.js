@@ -38,7 +38,7 @@ import {
 } from './trainer-managed.js';
 import {
   TEMPLATES_MAX, ASSIGN_MAX, buildTemplate, changeTemplate, cleanContent, summaryOf as templateSummary, addToDoc, buildOffer, pushOffer, offerView,
-  readTemplates, writeTemplates, removeTemplates,
+  readTemplates, writeTemplates, removeTemplates, offerSummary, withoutNotes, requestIdOf, seenResult, rememberResult,
 } from './trainer-templates.js';
 import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS,
@@ -2593,12 +2593,19 @@ function templatesOr503(res, user) {
   return all;
 }
 // One client's share of an assignment: { linkId, result: 'added' | 'offered' | 'error', code? }.
-function deliverToLink(req, user, linkId, content, { templateId = '', templateName = '', via = 'assign' } = {}) {
+function deliverToLink(req, user, linkId, content, { templateId = '', templateName = '', via = 'assign', requestId = '', scope = '' } = {}) {
   const fail = code => ({ linkId, result: 'error', code });
   const link = typeof linkId === 'string' && ID_RE.test(linkId)
     ? db.trainerLinks.find(l => l.id === linkId && l.coachUid === user.id && l.status === 'active') : null;
   const client = link && db.users.find(u => u.id === link.clientUid);
   if (!link || !client || client.disabled) return fail('client-gone');
+  // The same request again (the answer was lost): what it answered, with nothing written a second time.
+  const seen = seenResult(link, requestId, scope);
+  if (seen) return seen;
+  const keep = result => {
+    if (!requestId) return;
+    link.assigned = rememberResult(link.assigned, requestId, scope, result);
+  };
   if (link.managed) {
     const t = managedClientOf(user, linkId);
     if (!t) return fail('client-gone');
@@ -2610,15 +2617,22 @@ function deliverToLink(req, user, linkId, content, { templateId = '', templateNa
     const out = commitState(t.client, { state: added.doc, baseRev: cur?._rev || 0, baseWid: cur?._wid }, { coachUid: user.id });
     if (out.status !== 200) return fail('write-failed');
     audit(req, 'trainer.template.assign', { user, target: t.client, msg: via + ':added' });
-    return { linkId, result: 'added', routineCount: added.routineIds.length };
+    const done = { linkId, result: 'added', routineCount: added.routineIds.length };
+    // The diary is written; failing to note the request only costs the protection against a repeat.
+    const noted = link.assigned;
+    keep(done);
+    try { if (requestId) saveDb(); } catch (error) { link.assigned = noted; console.error('trainer request id was not saved', error.message); }
+    return done;
   }
   const made = buildOffer(content, { templateId, templateName });
   if (made.error) return fail(made.error);
-  const before = link.offers;
+  const before = link.offers, noted = link.assigned;
   link.offers = pushOffer(before, made.offer);
-  try { saveDb(); } catch (error) { link.offers = before; console.error('trainer offer was not saved', error.message); return fail('write-failed'); }
+  const done = { linkId, result: 'offered' };
+  keep(done);
+  try { saveDb(); } catch (error) { link.offers = before; link.assigned = noted; console.error('trainer offer was not saved', error.message); return fail('write-failed'); }
   audit(req, 'trainer.template.assign', { user, target: client, msg: via + ':offered' });
-  return { linkId, result: 'offered' };
+  return done;
 }
 // The links of a body's `linkIds` (or `toLinkIds`): a list of ids, without repeats, at most ASSIGN_MAX.
 function linkIdsOf(raw) {
@@ -2635,7 +2649,8 @@ function routinesOfDiary(client, ids) {
   if (picked.some(r => !r)) return { fail: [404, 'routine-gone', 'Такой рутины в дневнике подопечного нет. Подождите секунду, пока дневник сохранится, и повторите'] };
   const content = cleanContent({ routines: picked, customEx: Array.isArray(S?.customEx) ? S.customEx : [] });
   if (content.error) return { fail: [content.status || 400, content.error, content.text] };
-  return { content: { ...content, unit: S?.unit === 'lb' ? 'lb' : 'kg' } };
+  // What the trainer wrote about this client in the notes is not handed on to a template or to another client.
+  return { content: { ...withoutNotes(content), dropped: content.dropped, unit: S?.unit === 'lb' ? 'lb' : 'kg' } };
 }
 
 // The offer `offerId` on the signed-in client's active link, taken off it; { offer, coach } or null.
@@ -2783,7 +2798,7 @@ const routes = {
         // The reason is the trainer's own note; the client is told only that there is a pause and until when.
         ...(link.status === 'active' && pauseOf(link, trainerToday(coach)) ? { pause: { until: pauseOf(link, trainerToday(coach)).until } } : {}),
         // Offers (section 17) only on an active link: an archived one hands the trainer nothing, offers included.
-        offers: link.status === 'active' ? (Array.isArray(link.offers) ? link.offers : []).map(offerView) : [] } : null
+        offers: link.status === 'active' ? (Array.isArray(link.offers) ? link.offers : []).map(o => offerSummary(o, displayName(coach))) : [] } : null
     });
   },
   'PUT /api/trainer/me': async (req, res) => {
@@ -2807,7 +2822,7 @@ const routes = {
     // The archived Telegram clients end with the role: the client keeps their data and is free to find another trainer.
     const archived = body.enabled ? [] : archivedLinks(db, user.id);
     const archivedBefore = archived.map(l => JSON.stringify(l));
-    archived.forEach(l => { l.status = 'revoked'; l.revokedAt = new Date().toISOString(); l.revokedBy = 'coach'; delete l.archivedAt; });
+    archived.forEach(l => { l.status = 'revoked'; l.revokedAt = new Date().toISOString(); l.revokedBy = 'coach'; delete l.archivedAt; delete l.offers; delete l.assigned; });
     try { saveDb(); } catch (error) {
       if (before) user.trainer = before; else delete user.trainer;
       invites.forEach(i => { delete i.revokedAt; });
@@ -2899,6 +2914,17 @@ const routes = {
   },
   // Offers (TG14, section 17): what the trainer handed to a client who signed in with Telegram. The server only keeps and
   // removes the offer; the client's app adds the routines to its own diary with its own PUT /api/data.
+  // The whole offer, for the client of the link it is on: the list in GET /api/trainer/me carries names only.
+  'GET /api/trainer/offers/{id}': async (req, res) => {
+    const user = trainerCaller(req, res);
+    if (!user) return;
+    const wait = TRAINER_READS.take(user.id);
+    if (wait) return tooMany(res, wait);
+    const link = clientLink(db, user.id);
+    const offer = link && ID_RE.test(req.trainerId || '') ? (link.offers || []).find(o => o && o.id === req.trainerId) : null;
+    if (!offer) return trainerFail(res, 404, 'offer-gone', 'Предложение не найдено: возможно, оно уже принято или отозвано');
+    json(res, 200, { offer: offerView(offer) });
+  },
   'POST /api/trainer/offers/{id}/accept': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
@@ -3168,7 +3194,7 @@ const routes = {
     if (made.error) return trainerFail(res, made.status, made.error, made.text);
     writeTemplates(DATA, user.id, [...all, made.template]);
     audit(req, 'trainer.template.create', { user });
-    json(res, 200, { ok: true, template: made.template });
+    json(res, 200, { ok: true, template: made.template, dropped: made.dropped });
   },
   // A template out of the routines of a client without Telegram. A Telegram client's routines are not given to the trainer.
   'POST /api/trainer/templates/from-client/{id}': async (req, res) => {
@@ -3188,11 +3214,12 @@ const routes = {
     if (all.length >= TEMPLATES_MAX) return trainerFail(res, 409, 'templates-limit', `Можно хранить до ${TEMPLATES_MAX} шаблонов`, { limit: TEMPLATES_MAX });
     const got = routinesOfDiary(t.client, body && body.routineIds);
     if (got.fail) return trainerFail(res, ...got.fail);
-    const made = buildTemplate({ name: body.name, note: body.note, ...got.content });
+    const { dropped: skipped, ...stored } = got.content;
+    const made = buildTemplate({ name: body.name, note: body.note, ...stored });
     if (made.error) return trainerFail(res, made.status, made.error, made.text);
     writeTemplates(DATA, user.id, [...all, made.template]);
     audit(req, 'trainer.template.create', { user, target: t.client, msg: 'from-client' });
-    json(res, 200, { ok: true, template: made.template });
+    json(res, 200, { ok: true, template: made.template, dropped: skipped + made.dropped });
   },
   'GET /api/trainer/templates/{id}': async (req, res) => {
     const user = templateCaller(req, res, TRAINER_READS);
@@ -3235,11 +3262,13 @@ const routes = {
     const body = await readBody(req);
     const ids = linkIdsOf(body && body.linkIds);
     if (!ids) return trainerFail(res, 400, 'links-required', `Выберите подопечных (не больше ${ASSIGN_MAX})`);
+    const requestId = requestIdOf(body.requestId);
+    if (requestId === null) return trainerFail(res, 400, 'bad-request', 'Ключ запроса указан неверно');
     const all = templatesOr503(res, user);
     if (!all) return;
     const template = all.find(x => x.id === req.trainerId);
     if (!template) return trainerFail(res, 404, 'template-gone', 'Шаблон не найден');
-    const results = ids.map(linkId => deliverToLink(req, user, linkId, template, { templateId: template.id, templateName: template.name }));
+    const results = ids.map(linkId => deliverToLink(req, user, linkId, template, { templateId: template.id, templateName: template.name, requestId, scope: 't:' + template.id }));
     json(res, 200, { ok: true, results });
   },
   // The same from one client without Telegram to others: the routines are read from the source diary, then handed over as a template would be.
@@ -3251,14 +3280,16 @@ const routes = {
     if (!t) return;
     const ids = linkIdsOf(body && body.toLinkIds);
     if (!ids) return trainerFail(res, 400, 'links-required', `Выберите подопечных (не больше ${ASSIGN_MAX})`);
+    const requestId = requestIdOf(body.requestId);
+    if (requestId === null) return trainerFail(res, 400, 'bad-request', 'Ключ запроса указан неверно');
     const got = routinesOfDiary(t.client, body.routineIds);
     if (got.fail) return trainerFail(res, ...got.fail);
     const names = got.content.routines.map(r => r.name);
     const templateName = (names.length > 1 ? `${names[0]} и ещё ${names.length - 1}` : names[0]).slice(0, 60);
     const results = ids.map(linkId => (linkId === t.link.id
       ? { linkId, result: 'error', code: 'same-client' }
-      : deliverToLink(req, user, linkId, got.content, { templateName, via: 'copy' })));
-    json(res, 200, { ok: true, results });
+      : deliverToLink(req, user, linkId, got.content, { templateName, via: 'copy', requestId, scope: 'c:' + t.link.id + ':' + body.routineIds.join(',') })));
+    json(res, 200, { ok: true, results, dropped: got.content.dropped });
   },
   // Which days this client comes, at what time, and whether to remind the trainer that morning. The trainer's own.
   'PUT /api/trainer/links/{id}/schedule': async (req, res) => {
@@ -3381,13 +3412,16 @@ const routes = {
       && (l.coachUid === user.id || l.clientUid === user.id)) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     if (link.managed) return trainerFail(res, 409, 'managed-link', 'Подопечный без Telegram удаляется целиком: откройте его и выберите «Удалить подопечного»');
-    const was = { status: link.status, archivedAt: link.archivedAt, pause: link.pause };
+    const was = { status: link.status, archivedAt: link.archivedAt, pause: link.pause, offers: link.offers, assigned: link.assigned };
     link.status = 'revoked'; link.revokedAt = new Date().toISOString(); link.revokedBy = link.clientUid === user.id ? 'client' : 'coach';
-    delete link.archivedAt; delete link.pause;
+    // Nothing offered to the client stays on an ended link (templates, section 17).
+    delete link.archivedAt; delete link.pause; delete link.offers; delete link.assigned;
     try { saveDb(); } catch (error) {
       link.status = was.status; delete link.revokedAt; delete link.revokedBy;
       if (was.archivedAt) link.archivedAt = was.archivedAt;
       if (was.pause) link.pause = was.pause;
+      if (was.offers) link.offers = was.offers;
+      if (was.assigned) link.assigned = was.assigned;
       throw error;
     }
     trainerReadNoted.delete(link.id);
@@ -4271,8 +4305,8 @@ const server = http.createServer(async (req, res) => {
   const tt = !tf && /^\/api\/trainer\/templates\/([^/]+)(?:\/(assign))?$/.exec(url.pathname);
   if (tf) { key = req.method + ' /api/trainer/templates/from-client/{id}'; req.trainerId = tf[1]; }
   else if (tt) { key = req.method + ' /api/trainer/templates/{id}' + (tt[2] ? '/' + tt[2] : ''); req.trainerId = tt[1]; }
-  const to = /^\/api\/trainer\/offers\/([^/]+)\/(accept|decline)$/.exec(url.pathname);
-  if (to) { key = req.method + ' /api/trainer/offers/{id}/' + to[2]; req.trainerId = to[1]; }
+  const to = /^\/api\/trainer\/offers\/([^/]+)(?:\/(accept|decline))?$/.exec(url.pathname);
+  if (to) { key = req.method + ' /api/trainer/offers/{id}' + (to[2] ? '/' + to[2] : ''); req.trainerId = to[1]; }
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: 'not found' });
   if (TELEGRAM_ONLY && TELEGRAM_ONLY_REFUSED.has(key)) return json(res, 403, { error: 'sign-in is only through Telegram', code: 'telegram-only' });

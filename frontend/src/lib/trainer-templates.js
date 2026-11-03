@@ -6,8 +6,29 @@ import { EXIDX } from './exercises.js'
 import { exerciseNameFor } from './i18n-core.js'
 import { plural } from './plan-link.js'
 
+/** A key for one opened sheet: the same key sent again is answered, not done again (api/trainer-templates.js `seenResult`). */
+export function newRequestId() {
+  try { if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID() } catch { /* no crypto */ }
+  return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12)
+}
+
 export const routinesCount = n => `${n} ${plural(n, 'рутина', 'рутины', 'рутин')}`
 export const exercisesCount = n => `${n} ${plural(n, 'упражнение', 'упражнения', 'упражнений')}`
+
+/** What was left out, for the trainer: «Пропущено 2 упражнения: своё упражнение удалено.» Empty when nothing was. */
+export const droppedLine = n => (n > 0 ? `Пропущено ${exercisesCount(n)}: своё упражнение удалено.` : '')
+
+// Hand-copied from api/trainer-templates.js (the api image cannot import the frontend): «Тяни», «Тяни (2)», «Тяни (3)».
+const ROUTINE_NAME_MAX = 80
+export function freeName(name, taken) {
+  const used = new Set([...taken].map(n => String(n).trim().toLowerCase()))
+  if (!used.has(name.toLowerCase())) return name
+  for (let i = 2; ; i++) {
+    const suffix = ` (${i})`
+    const candidate = name.slice(0, ROUTINE_NAME_MAX - suffix.length) + suffix
+    if (!used.has(candidate.toLowerCase())) return candidate
+  }
+}
 
 /** "3 рутины: Тяни, Толкай, Ноги", cut short when the names are many. */
 export function compositionLine(names, max = 4) {
@@ -103,7 +124,18 @@ export const offerBundle = offer => ({
  */
 export function addOfferToState(s, offer) {
   if (offerAlreadyAdded(s, offer.id)) return { added: 0, dropped: 0 }
-  const parsed = parsePlan(offerBundle(offer), s.unit == null ? 'kg' : s.unit)
+  // A name the person already has gets a suffix, as when the trainer's server copies into a diary: «Тяни (2)».
+  const taken = (s.routines || []).map(r => r && r.name).filter(Boolean)
+  const renamed = []
+  const named = (offer.routines || []).map(r => {
+    if (!r || typeof r !== 'object' || !r.name) return r
+    const name = freeName(String(r.name), [...taken, ...renamed])
+    renamed.push(name)
+    return { ...r, name }
+  })
+  const parsed = parsePlan(offerBundle({ ...offer, routines: named }), s.unit == null ? 'kg' : s.unit)
+  // Not one exercise of the offer is known here: there is nothing to add, and the person is told so instead of getting empty routines.
+  if (parsed.dropped > 0 && parsed.exerciseCount === 0) return { added: 0, dropped: parsed.dropped }
   const res = mergePlan(s, parsed)
   const made = new Set(res.ids)
   s.routines.forEach(r => { if (made.has(r.id)) r.fromOffer = offer.id })

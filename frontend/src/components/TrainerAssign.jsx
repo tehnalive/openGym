@@ -1,8 +1,8 @@
 // Choosing the clients who get a template or a copy of routines (TG14, section 17). Used by the template card in the cabinet
 // and by the routines block of a client's diary. Russian only, like the other trainer screens.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { trainerApi, errorText } from '../lib/trainer.js'
-import { assignSummary, allFailed } from '../lib/trainer-templates.js'
+import { assignSummary, allFailed, newRequestId, droppedLine } from '../lib/trainer-templates.js'
 import { Button, Check } from './ui.jsx'
 
 /** The trainer's clients with an active link (a client on pause is one; the archived come separately and are never offered), loaded once; `exclude` is a link id left out (the client the routines come from). */
@@ -37,8 +37,10 @@ export function ClientPicker({ clients, picked, onToggle }) {
 }
 
 /**
- * The step "to whom": the list of clients, the button, and the outcome. `send(linkIds)` resolves with the server's
- * `results`. A refusal of the whole request, or every client failing, keeps the choice for another try.
+ * The step "to whom": the list of clients, the button, and the outcome. `send(linkIds, requestId)` resolves with the server's
+ * `results`. One request id per opened panel: a repeat after a lost answer is answered by the server, not done twice.
+ * A refusal of the whole request, or every client failing, keeps the choice for another try; when only some failed, those
+ * stay chosen and the button repeats for them alone, the ones that went through are not sent again.
  */
 export default function AssignPanel({ send, exclude, sendLabel = 'Назначить', empty = 'Других подопечных пока нет.', onDone }) {
   const { clients, error: loadError } = useClients(exclude)
@@ -46,14 +48,24 @@ export default function AssignPanel({ send, exclude, sendLabel = 'Назначи
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState('')
+  const [report, setReport] = useState('')   // what went through when only some did
+  const requestId = useRef(newRequestId())
   const toggle = id => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
   const go = async () => {
     setBusy(true); setError('')
     try {
-      const r = await send(picked)
+      const r = await send(picked, requestId.current)
+      const left = droppedLine(r.dropped)
       const text = assignSummary(r.results, clients)
+      const failed = (r.results || []).filter(x => x.result === 'error').map(x => x.linkId)
       if (allFailed(r.results)) setError(text)
-      else { setDone(text); onDone?.(r.results) }
+      else if (failed.length) {
+        // Some went through: say so, and leave only the failed ones chosen.
+        setReport(assignSummary((r.results || []).filter(x => x.result !== 'error'), clients) + (left ? ' ' + left : ''))
+        setError(assignSummary((r.results || []).filter(x => x.result === 'error'), clients))
+        setPicked(failed)
+        onDone?.(r.results)
+      } else { setDone(text + (left ? ' ' + left : '')); onDone?.(r.results) }
     } catch (e) { setError(errorText(e)) }
     finally { setBusy(false) }
   }
@@ -62,8 +74,9 @@ export default function AssignPanel({ send, exclude, sendLabel = 'Назначи
   if (!clients) return <div className="dim small">Загружаем подопечных…</div>
   if (!clients.length) return <div className="dim small" style={{ lineHeight: 1.4 }}>{empty}</div>
   return <>
+    {report && <div role="status" style={{ lineHeight: 1.45, marginBottom: 12 }}>{report}</div>}
     <ClientPicker clients={clients} picked={picked} onToggle={toggle} />
     {error && <div role="alert" className="small" style={{ color: 'var(--red)', marginBottom: 12, lineHeight: 1.4 }}>{error}</div>}
-    <Button variant="primary" disabled={!picked.length || busy} onClick={go}>{busy ? 'Отправляем…' : sendLabel}</Button>
+    <Button variant="primary" disabled={!picked.length || busy} onClick={go}>{busy ? 'Отправляем…' : report ? 'Повторить для выбранных' : sendLabel}</Button>
   </>
 }

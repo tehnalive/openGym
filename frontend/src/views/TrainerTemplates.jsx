@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText } from '../lib/trainer.js'
-import { compositionLine, routineChoices, templateBody, exerciseLine, exercisesCount, routinesCount } from '../lib/trainer-templates.js'
+import { compositionLine, routineChoices, templateBody, exerciseLine, exercisesCount, routinesCount, droppedLine } from '../lib/trainer-templates.js'
 import AssignPanel from '../components/TrainerAssign.jsx'
 import { Button, Check, TextField } from '../components/ui.jsx'
 import Icon from '../components/Icon.jsx'
@@ -31,7 +31,7 @@ export function NewTemplate({ close, onSaved }) {
       const ids = choices.filter(c => picked.includes(c.id)).map(c => c.id)
       const made = await trainerApi.createTemplate(templateBody(S, ids, { name, note }))
       close()
-      toast('Шаблон сохранён')
+      toast('Шаблон сохранён' + (made.dropped ? '. ' + droppedLine(made.dropped) : ''))
       onSaved?.(made.template)
     } catch (e) { setError(errorText(e)); setBusy(false) }
   }
@@ -95,7 +95,7 @@ export function TemplateCard({ id, close, onChanged }) {
   if (mode === 'assign') return <>
     <h3>Назначить: {tpl.name}</h3>
     <div className="dim small" style={{ marginBottom: 12, lineHeight: 1.4 }}>Каждый получит свою копию: {compositionLine(tpl.routines.map(r => r.name))}. Дальше копия живёт отдельно от шаблона.</div>
-    <AssignPanel send={ids => trainerApi.assignTemplate(tpl.id, ids)} />
+    <AssignPanel send={(ids, requestId) => trainerApi.assignTemplate(tpl.id, ids, requestId)} />
     <div style={{ height: 8 }} /><Button variant="ghost" className="dim" onClick={() => setMode('card')}>Назад</Button>
   </>
   if (mode === 'rename') return <>

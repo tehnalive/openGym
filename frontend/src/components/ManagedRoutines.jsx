@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react'
 import { useUI } from '../store/useUI.js'
 import { trainerApi, errorText } from '../lib/trainer.js'
-import { exercisesCount } from '../lib/trainer-templates.js'
+import { exercisesCount, droppedLine } from '../lib/trainer-templates.js'
 import AssignPanel from './TrainerAssign.jsx'
 import { Button, Check, TextField } from './ui.jsx'
 
@@ -20,9 +20,9 @@ function ToTemplate({ linkId, ids, close }) {
   const save = async () => {
     setBusy(true); setError('')
     try {
-      await trainerApi.templateFromClient(linkId, { name: name.trim(), note: note.trim(), routineIds: ids })
+      const made = await trainerApi.templateFromClient(linkId, { name: name.trim(), note: note.trim(), routineIds: ids })
       close()
-      toast('Шаблон сохранён. Он в кабинете тренера, раздел «Шаблоны».')
+      toast('Шаблон сохранён. Он в кабинете тренера, раздел «Шаблоны».' + (made.dropped ? ' ' + droppedLine(made.dropped) : ''))
     } catch (e) { setError(errorText(e)); setBusy(false) }
   }
   return <>
@@ -44,7 +44,7 @@ function CopyToClients({ linkId, ids, close }) {
     <h3>Скопировать другому подопечному</h3>
     <div className="dim small" style={{ marginBottom: 12, lineHeight: 1.4 }}>Выбранные рутины ({ids.length}) получат копию. Дальше копия живёт отдельно от оригинала.</div>
     <AssignPanel exclude={linkId} sendLabel="Скопировать" empty="Других подопечных пока нет."
-      send={to => trainerApi.copyRoutines(linkId, ids, to)} />
+      send={(to, requestId) => trainerApi.copyRoutines(linkId, ids, to, requestId)} />
     <div style={{ height: 8 }} />
     <Button variant="ghost" className="dim" onClick={close}>Закрыть</Button>
   </>

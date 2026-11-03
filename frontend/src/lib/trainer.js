@@ -69,10 +69,11 @@ export const trainerApi = {
   changeTemplate: (id, body) => call('/api/trainer/templates/' + encodeURIComponent(id), 'PUT', body),
   deleteTemplate: id => call('/api/trainer/templates/' + encodeURIComponent(id), 'DELETE'),
   templateFromClient: (linkId, body) => call('/api/trainer/templates/from-client/' + encodeURIComponent(linkId), 'POST', body),
-  assignTemplate: (id, linkIds) => call('/api/trainer/templates/' + encodeURIComponent(id) + '/assign', 'POST', { linkIds }),
+  assignTemplate: (id, linkIds, requestId) => call('/api/trainer/templates/' + encodeURIComponent(id) + '/assign', 'POST', { linkIds, ...(requestId ? { requestId } : {}) }),
   managedRoutines: linkId => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/routines'),
-  copyRoutines: (linkId, routineIds, toLinkIds) => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/routines/copy', 'POST', { routineIds, toLinkIds }),
+  copyRoutines: (linkId, routineIds, toLinkIds, requestId) => call('/api/trainer/managed/' + encodeURIComponent(linkId) + '/routines/copy', 'POST', { routineIds, toLinkIds, ...(requestId ? { requestId } : {}) }),
   // A client who signed in with Telegram answers an offer of the trainer.
+  offer: id => call('/api/trainer/offers/' + encodeURIComponent(id)),
   acceptOffer: id => call('/api/trainer/offers/' + encodeURIComponent(id) + '/accept', 'POST', {}),
   declineOffer: id => call('/api/trainer/offers/' + encodeURIComponent(id) + '/decline', 'POST', {}),
 }

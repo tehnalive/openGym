@@ -71,7 +71,7 @@ describe('adding an offer to the diary', () => {
     const s = draft({ routines: [{ id: 'mine', name: 'Тяни', ex: [] }] })
     const r = addOfferToState(s, offer())
     expect(r).toEqual({ added: 2, dropped: 0 })
-    expect(s.routines.map(x => x.name)).toEqual(['Тяни', 'Тяни', 'Толкай'])
+    expect(s.routines.map(x => x.name)).toEqual(['Тяни', 'Тяни (2)', 'Толкай'])
     expect(s.routines[0]).toEqual({ id: 'mine', name: 'Тяни', ex: [] })
     const added = s.routines.slice(1)
     expect(added.every(x => x.fromOffer === 'offer-0001')).toBe(true)
@@ -114,5 +114,23 @@ describe('adding an offer to the diary', () => {
     const b = offerBundle(offer({ unit: 'lb' }))
     expect(b.opengym_plan).toBe(1); expect(b.unit).toBe('lb'); expect(b.week).toEqual({}); expect(b.name).toBe('Тяни-Толкай')
     expect(offerBundle(offer({ unit: 'stone' })).unit).toBe('kg')
+  })
+})
+
+describe('names, leftovers and keys', () => {
+  it('a free name gets a suffix without regard to case and keeps within the length', async () => {
+    const { freeName, droppedLine, newRequestId } = await import('./trainer-templates.js')
+    expect(freeName('Тяни', ['Ноги'])).toBe('Тяни')
+    expect(freeName('Тяни', ['тяни', 'Тяни (2)'])).toBe('Тяни (3)')
+    expect(freeName('я'.repeat(80), ['я'.repeat(80)]).length).toBeLessThanOrEqual(80)
+    expect(droppedLine(0)).toBe(''); expect(droppedLine(1)).toBe('Пропущено 1 упражнение: своё упражнение удалено.'); expect(droppedLine(3)).toContain('3 упражнения')
+    expect(newRequestId()).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+    expect(newRequestId()).not.toBe(newRequestId())
+  })
+  it('an offer none of whose exercises is known adds no routines', () => {
+    const s = draft()
+    const r = addOfferToState(s, { id: 'o-1', templateName: 'Х', unit: 'kg', routines: [{ id: 'a', name: 'Чужая', ex: [{ id: 'no-such-exercise-xyz', sets: 1 }] }], customEx: [] })
+    expect(r).toEqual({ added: 0, dropped: 1 })
+    expect(s.routines).toEqual([])
   })
 })

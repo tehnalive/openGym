@@ -14,13 +14,17 @@ import { Button } from './ui.jsx'
 const ui = () => useUI.getState()
 const toast = m => ui().toast(m)
 
-/** Put the offer in the diary (once) and close it on the server. Resolves to { added, dropped, closed }. Exported for the tests. */
-export async function acceptOffer(offer) {
+/** Put the offer in the diary (once) and close it on the server. Resolves to { added, dropped, closed }. Exported for the tests.
+ *  `userId` is the profile the offer was opened for: if another one is signed in by now (an account switched under an open
+ *  sheet) nothing is written and `stale` is true. An offer none of whose exercises this app knows adds nothing, is not
+ *  remembered as added, and is still closed on the server (it would only come back to say the same). */
+export async function acceptOffer(offer, userId) {
   const store = useStore.getState()
+  if (userId && store.user?.id !== userId) return { added: 0, dropped: 0, closed: false, stale: true }
   let added = 0, dropped = 0
   if (!offerAlreadyAdded(store.S, offer.id)) {
     store.update(s => { const r = addOfferToState(s, offer); added = r.added; dropped = r.dropped })
-    rememberOfferAdded(offer.id)
+    if (!(added === 0 && dropped > 0)) rememberOfferAdded(offer.id)
   }
   let closed = true
   try { await trainerApi.acceptOffer(offer.id) } catch (e) { closed = e?.status === 404 }
@@ -31,11 +35,11 @@ export async function declineOffer(offer) {
   try { await trainerApi.declineOffer(offer.id); return true } catch (e) { if (e?.status === 404) return true; throw e }
 }
 
-export const trainerOfferSheet = (coachName, offers) =>
-  ui().openSheet(close => <TrainerOffer coachName={coachName} offers={offers} close={close} />, { locked: false })
+export const trainerOfferSheet = (coachName, offers, userId = useStore.getState().user?.id) =>
+  ui().openSheet(close => <TrainerOffer coachName={coachName} offers={offers} userId={userId} close={close} />, { locked: false })
 
 /** The offers one after another: each is added or declined, then the next shows; "later" closes the sheet. */
-export function TrainerOffer({ coachName, offers, close }) {
+export function TrainerOffer({ coachName, offers, userId, close }) {
   const [at, setAt] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -45,8 +49,11 @@ export function TrainerOffer({ coachName, offers, close }) {
   const add = async () => {
     setBusy(true); setError('')
     try {
-      const r = await acceptOffer(offer)
-      toast(!r.closed ? 'Добавлено в ваш план. Предложение закроется при следующем открытии.' : r.added ? 'Добавлено в ваш план' : 'Это уже есть в вашем плане')
+      const r = await acceptOffer(offer, userId)
+      if (r.stale) { close(); toast('Вы вошли в другой аккаунт. Откройте предложение заново.'); return }
+      const skipped = r.dropped > 0 ? ` Пропущено ${exercisesCount(r.dropped)}: их нет в вашей библиотеке.` : ''
+      if (r.added === 0 && r.dropped > 0) toast('Ничего не добавлено: этих упражнений нет в вашей библиотеке.')
+      else toast((!r.closed ? 'Добавлено в ваш план. Предложение закроется при следующем открытии.' : r.added ? 'Добавлено в ваш план.' : 'Это уже есть в вашем плане.') + skipped)
       const last = at + 1 >= offers.length
       next()
       if (last) nav('/plan')
@@ -78,22 +85,25 @@ export function TrainerOffer({ coachName, offers, close }) {
 /** On opening the app, once the client is signed in through Telegram: the offers waiting from the trainer. One already in
  *  the diary (the answer to the server was lost) is closed quietly; the others open as a sheet, one after another. */
 export default function TrainerOfferGate({ blocked }) {
-  const done = useRef(false)
+  const userId = useStore(s => s.user?.id)
+  const asked = useRef(null)        // the profile this gate has already asked for
   useEffect(() => {
-    if (blocked || done.current) return
-    done.current = true
+    // Once per profile: another account signing in under the same page asks again.
+    if (blocked || !userId || asked.current === userId) return
+    asked.current = userId
     ;(async () => {
       let me
       try { me = await trainerApi.me() } catch { return }
-      const offers = me?.asClient?.offers || []
+      const listed = me?.asClient?.offers || []
       const S = useStore.getState().S
       const open = []
-      for (const o of offers) {
+      for (const o of listed) {
         if (offerAlreadyAdded(S, o.id)) { trainerApi.acceptOffer(o.id).catch(() => {}); continue }
-        open.push(o)
+        // The list names the offers; the routines of each come from the offer itself.
+        try { open.push({ ...(await trainerApi.offer(o.id)).offer }) } catch { /* taken back meanwhile */ }
       }
-      if (open.length) trainerOfferSheet(me.asClient.coachName, open)
+      if (open.length && useStore.getState().user?.id === userId) trainerOfferSheet(me.asClient.coachName, open, userId)
     })()
-  }, [blocked])
+  }, [blocked, userId])
   return null
 }

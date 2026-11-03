@@ -3527,8 +3527,8 @@ paths:
                           until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
                       offers:
                         type: array
-                        description: 'Open offers from the trainer (TRAINER_MODE.md section 17), at most 5. Empty while the link is archived: archiving withdraws them (section 14).'
-                        items: { $ref: '#/components/schemas/TrainerOffer' }
+                        description: 'Open offers from the trainer (TRAINER_MODE.md section 17), at most 5, by name only: the routines come with `GET /api/trainer/offers/{id}`. Empty while the link is archived: archiving withdraws them (section 14).'
+                        items: { $ref: '#/components/schemas/TrainerOfferSummary' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: 'Not a Telegram profile (`code: telegram-required`).'
@@ -4190,6 +4190,8 @@ paths:
                         exerciseCount: { type: integer }
                         updatedAt: { type: string, format: date-time }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '403':
           description: 'Not a Telegram profile (`telegram-required`) or not a trainer (`not-trainer`).'
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -4224,9 +4226,12 @@ paths:
                 properties:
                   ok: { type: boolean }
                   template: { type: object }
+                  dropped: { type: integer, description: 'Exercises left out because they point at a custom exercise that is gone.' }
         '400':
           description: '`name-required`, `routines-required`, `too-many-routines`, `routine-invalid`, `custom-invalid`, `bad-request`.'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '403':
           description: '`telegram-required` or `not-trainer`.'
         '409':
@@ -4270,9 +4275,12 @@ paths:
                 properties:
                   ok: { type: boolean }
                   template: { type: object }
+                  dropped: { type: integer, description: 'Exercises left out because they point at a custom exercise that is gone. Notes are not taken into the template.' }
         '400':
           description: 'As for `POST /api/trainer/templates`, and `routines-required`.'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '403':
           description: '`client-private` (a Telegram client), `not-trainer`.'
         '404':
@@ -4301,6 +4309,10 @@ paths:
                 properties:
                   template: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`telegram-required` or `not-trainer`.'
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '404':
           description: 'Not the caller''s template (`template-gone`).'
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -4334,6 +4346,10 @@ paths:
         '400':
           description: '`name-required`, `routines-required`, `routine-gone`, `bad-request`.'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`telegram-required` or `not-trainer`.'
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '404':
           description: '`template-gone`.'
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -4352,6 +4368,10 @@ paths:
                 properties:
                   ok: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`telegram-required` or `not-trainer`.'
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '404':
           description: '`template-gone`.'
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -4384,6 +4404,7 @@ paths:
               required: [linkIds]
               properties:
                 linkIds: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+                requestId: { type: string, pattern: '^[A-Za-z0-9_-]{8,64}$', description: 'A key the app makes once per opened sheet. The same key again on the same link answers what it answered, with nothing written; the link keeps the last 20 results for 24 hours. An `error` result is not kept, so a retry of what failed does try again.' }
       responses:
         '200':
           description: One result per link.
@@ -4404,6 +4425,10 @@ paths:
         '400':
           description: '`links-required`.'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`telegram-required` or `not-trainer`.'
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '404':
           description: '`template-gone`.'
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -4439,6 +4464,10 @@ paths:
                         name: { type: string }
                         exerciseCount: { type: integer }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`telegram-required` or `not-trainer`.'
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '404':
           description: 'Not the caller''s managed client (`client-gone`).'
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -4467,6 +4496,7 @@ paths:
               properties:
                 routineIds: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
                 toLinkIds: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+                requestId: { type: string, pattern: '^[A-Za-z0-9_-]{8,64}$', description: 'As for assigning a template.' }
       responses:
         '200':
           description: One result per recipient, as for assigning a template.
@@ -4477,11 +4507,43 @@ paths:
                 properties:
                   ok: { type: boolean }
                   results: { type: array, items: { type: object } }
+                  dropped: { type: integer, description: 'Exercises left out because they point at a custom exercise that is gone. Notes of routines and exercises are not copied.' }
         '400':
           description: '`links-required`, `routines-required`.'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`telegram-required` or `not-trainer`.'
+        '503':
+          description: '`unreadable`: the templates file or the diary cannot be read now; nothing is overwritten.'
         '404':
           description: '`client-gone` or `routine-gone`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/offers/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getTrainerOffer
+      summary: One offer with its routines
+      description: For the client of the link the offer is on, while the link is active. The app reads it before showing the offer.
+      responses:
+        '200':
+          description: The offer.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  offer: { $ref: '#/components/schemas/TrainerOffer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a Telegram profile (`telegram-required`).'
+        '404':
+          description: '`offer-gone`: not an offer on the caller''s active link.'
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/trainer/offers/{id}/accept:
@@ -4978,6 +5040,16 @@ components:
         history: { type: boolean }
         measures: { type: boolean }
         stats: { type: boolean }
+
+    TrainerOfferSummary:
+      type: object
+      description: 'An offer in the client''s list: who sent what, and when.'
+      properties:
+        id: { type: string }
+        templateName: { type: string }
+        coachName: { type: string }
+        routineNames: { type: array, items: { type: string } }
+        at: { type: string, format: date-time }
 
     TrainerOffer:
       type: object
