@@ -548,3 +548,111 @@ test('a managed write by assignment carries no "written by the trainer" mark on 
   assert.equal(ok.status, 200, ok.text);
   assert.equal(stateOf(app, clientOfLink(app, link)).routines.length, 2);
 });
+
+// ---- templates with pause and archive (TG14, sections 14 and 17 together) ----
+
+test('an archived client gets no offer: the open ones are withdrawn, the client sees none, accept and decline read "not there", and a restore brings none back', async t => {
+  const { app, who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const link = await telegramClient(who.coach, who.c1);
+  const tpl = (await make(who.coach)).body.template;
+  assert.equal((await who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: [link] })).body.results[0].result, 'offered');
+  const offers = (await who.c1.get('/api/trainer/me')).body.asClient.offers;
+  assert.equal(offers.length, 1);
+
+  assert.equal((await who.coach.post(`/api/trainer/links/${link}/archive`, {})).status, 200);
+  assert.equal(app.db().trainerLinks.find(l => l.id === link).offers, undefined, 'the offers are gone from the link');
+  const me = (await who.c1.get('/api/trainer/me')).body.asClient;
+  assert.equal(me.status, 'archived'); assert.deepEqual(me.offers, []);
+  for (const verb of ['accept', 'decline']) {
+    const r = await who.c1.post(`/api/trainer/offers/${offers[0].id}/${verb}`, {});
+    assert.equal(r.status, 404, r.text); assert.equal(r.body.code, 'offer-gone');
+  }
+  // A new assignment to the archived link reads as "client-gone" and leaves nothing on it.
+  const again = await who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: [link] });
+  assert.deepEqual([again.body.results[0].result, again.body.results[0].code], ['error', 'client-gone']);
+  assert.equal(app.db().trainerLinks.find(l => l.id === link).offers, undefined);
+
+  assert.equal((await who.coach.post(`/api/trainer/links/${link}/restore`, {})).status, 200);
+  assert.deepEqual((await who.c1.get('/api/trainer/me')).body.asClient.offers, [], 'a restore does not bring the old offer back');
+  assert.equal((await who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: [link] })).body.results[0].result, 'offered');
+  assert.equal((await who.c1.get('/api/trainer/me')).body.asClient.offers.length, 1);
+});
+
+test('an archived managed client is out of templates and copying: not a target, not a source, the diary untouched; a paused one is both', async t => {
+  const { app, who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const a = await addManaged(who.coach, 'Первый');
+  const b = await addManaged(who.coach, 'Второй');
+  await seedDiary(who.coach, a, [routine({ id: 'a1', name: 'Тяни', ex: [squat()] })]);
+  const tpl = (await make(who.coach)).body.template;
+
+  // On pause the place and the access stay: it takes a template and gives its routines.
+  assert.equal((await who.coach.put(`/api/trainer/links/${b}/pause`, { until: null, tz: 'UTC' })).status, 200);
+  assert.equal((await who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: [b] })).body.results[0].result, 'added');
+  assert.equal((await who.coach.post(`/api/trainer/managed/${a}/routines/copy`, { routineIds: ['a1'], toLinkIds: [b] })).body.results[0].result, 'added');
+  const paused = await who.coach.get(`/api/trainer/managed/${b}/routines`);
+  assert.equal(paused.status, 200);
+  assert.equal((await who.coach.post(`/api/trainer/templates/from-client/${b}`, { name: 'С паузы', routineIds: [paused.body.routines[0].id] })).status, 200);
+  const onPause = (await who.coach.get('/api/trainer/clients')).body.clients.find(c => c.linkId === b);
+  assert.ok(onPause && onPause.pause, 'the list carries the pause that the picker names');
+
+  // Archived: as a target it is "client-gone" and its diary does not move.
+  assert.equal((await who.coach.post(`/api/trainer/links/${b}/archive`, {})).status, 200);
+  const frozen = JSON.stringify(stateOf(app, clientOfLink(app, b)));
+  const viaTemplate = await who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: [a, b] });
+  assert.deepEqual(viaTemplate.body.results.map(r => r.result), ['added', 'error']);
+  assert.equal(viaTemplate.body.results[1].code, 'client-gone');
+  const viaCopy = await who.coach.post(`/api/trainer/managed/${a}/routines/copy`, { routineIds: ['a1'], toLinkIds: [b] });
+  assert.equal(viaCopy.body.results[0].code, 'client-gone');
+  assert.equal(JSON.stringify(stateOf(app, clientOfLink(app, b))), frozen);
+
+  // Archived as a source: its routines are not read, listed, copied or made into a template.
+  const before = (await who.coach.get('/api/trainer/templates')).body.templates.length;
+  for (const r of [await who.coach.get(`/api/trainer/managed/${b}/routines`),
+    await who.coach.post(`/api/trainer/managed/${b}/routines/copy`, { routineIds: ['a1'], toLinkIds: [a] }),
+    await who.coach.post(`/api/trainer/templates/from-client/${b}`, { name: 'Из архива', routineIds: ['a1'] })]) {
+    assert.equal(r.status, 404, r.text); assert.equal(r.body.code, 'client-gone');
+  }
+  assert.equal((await who.coach.get('/api/trainer/templates')).body.templates.length, before);
+  // The list for the picker has no archived client; their data can still be saved by the trainer.
+  const listed = (await who.coach.get('/api/trainer/clients')).body;
+  assert.ok(!listed.clients.some(c => c.linkId === b) && listed.archived.some(c => c.linkId === b));
+  assert.equal((await who.coach.get(`/api/trainer/managed/${b}/export`)).status, 200);
+});
+
+test('the "written by the trainer" mark and the revision rules hold across assign, archive and restore', async t => {
+  const { app, who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const link = await addManaged(who.coach);
+  const client = clientOfLink(app, link);
+  const data = `/api/trainer/managed/${link}/data`;
+  const first = await who.coach.get(data);
+  const w = { id: 'w1', d: new Date().toISOString().slice(0, 10), start: Date.now() - 3600000, end: Date.now(), name: 'Ноги', _ts: Date.now(),
+    entries: [{ id: 'squat', sets: [{ w: 60, r: 8, done: true }] }] };
+  const wrote = await who.coach.put(data, { state: { ...first.body.state, workouts: [w] }, baseRev: first.body.rev, stamped: true });
+  assert.equal(wrote.status, 200, wrote.text);
+  assert.equal(stateOf(app, client).workouts[0].via, 'coach');
+
+  const beforeAssign = (await who.coach.get(data)).body.rev;   // the mark the writer did not send moves the stored revision one further
+  const tpl = (await make(who.coach)).body.template;
+  assert.equal((await who.coach.post(`/api/trainer/templates/${tpl.id}/assign`, { linkIds: [link] })).body.results[0].result, 'added');
+  const afterAssign = stateOf(app, client);
+  assert.equal(afterAssign.workouts[0].via, 'coach', 'an assignment keeps the mark of the earlier workout');
+  assert.equal(afterAssign.routines.length, 2);
+  assert.ok(afterAssign.routines.every(r => !('via' in r) && !('by' in r)), 'routines carry no mark');
+  assert.equal(afterAssign._rev, beforeAssign + 1, 'one revision for the assignment');
+
+  // Archive and restore touch no document: the revision, the mark and the routines stand as they were.
+  await who.coach.post(`/api/trainer/links/${link}/archive`, {});
+  assert.equal((await who.coach.get(data)).status, 404);
+  assert.equal((await who.coach.put(data, { state: afterAssign, baseRev: afterAssign._rev })).status, 404);
+  await who.coach.post(`/api/trainer/links/${link}/restore`, {});
+  const back = await who.coach.get(data);
+  assert.equal(back.body.rev, afterAssign._rev);
+  assert.equal(back.body.state.workouts[0].via, 'coach');
+  const again = await who.coach.put(data, { state: back.body.state, baseRev: back.body.rev, baseWid: back.body.state._wid, stamped: true });
+  assert.equal(again.status, 200, again.text);
+  assert.equal(stateOf(app, client).workouts[0].via, 'coach');
+  assert.equal(stateOf(app, client).routines.length, 2);
+});

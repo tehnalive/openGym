@@ -150,4 +150,12 @@ test('templates and offers (section 17): a client document is written only for a
   assert.ok(/managedTarget\(req, res, user\)/.test(server.slice(cStart, cStart + 500)), 'copy does not call managedTarget');
   // Nothing that is not a trainer's route writes a template file by hand.
   assert.ok(!/atomicWrite\([^)]*trainer-templates/.test(server));
+  // Pause and archive (section 14) stitched in: only active links take a template, a copy or an offer. managedClientOf is given
+  // statuses nowhere but inside managedTarget (the export and the delete), the offers are taken from the ACTIVE link of the
+  // client, and archiving withdraws them.
+  const clientOfCalls = [...server.matchAll(/managedClientOf\(([^)]*)\)/g)].map(m => m[1]).filter(a => !a.startsWith('user, id'));
+  assert.ok(clientOfCalls.length >= 3);
+  for (const a of clientOfCalls) assert.ok(a === 'user, req.trainerId, statuses' || a.split(',').length === 2, 'managedClientOf with statuses: ' + a);
+  assert.match(server.slice(server.indexOf('function takeOffer('), server.indexOf('function takeOffer(') + 200), /clientLink\(db, user\.id\)/);
+  assert.match(read('../trainer.js').split('export function archiveLink')[1].split('\n}')[0], /delete link\.offers/);
 });

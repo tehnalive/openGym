@@ -257,7 +257,7 @@ export function endPause(link, today) {
   delete link.pause;
 }
 
-/** Archive an active link: the pause is lifted, the archived time starts in the history. Mutates the link. */
+/** Archive an active link: the pause is lifted, the archived time starts in the history, open offers of the trainer (templates, TRAINER_MODE.md section 17) are withdrawn. Mutates the link. */
 export function archiveLink(link, today, nowIso) {
   endPause(link, today);
   link.pauses = Array.isArray(link.pauses) ? link.pauses : [];
@@ -265,6 +265,7 @@ export function archiveLink(link, today, nowIso) {
   trimPauses(link);
   link.status = 'archived';
   link.archivedAt = nowIso;
+  delete link.offers;
 }
 
 /** Bring an archived link back: from `today` on the client is expected again. Mutates the link. */

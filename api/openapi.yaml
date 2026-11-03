@@ -3527,7 +3527,7 @@ paths:
                           until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
                       offers:
                         type: array
-                        description: 'Open offers from the trainer (TRAINER_MODE.md section 17), at most 5.'
+                        description: 'Open offers from the trainer (TRAINER_MODE.md section 17), at most 5. Empty while the link is archived: archiving withdraws them (section 14).'
                         items: { $ref: '#/components/schemas/TrainerOffer' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
