@@ -5,7 +5,7 @@ import { trainerApi, errorText } from '../lib/trainer.js'
 import { assignSummary, allFailed } from '../lib/trainer-templates.js'
 import { Button, Check } from './ui.jsx'
 
-/** The trainer's active clients, loaded once; `exclude` is a link id left out (the client the routines come from). */
+/** The trainer's clients with an active link (a client on pause is one; the archived come separately and are never offered), loaded once; `exclude` is a link id left out (the client the routines come from). */
 export function useClients(exclude) {
   const [state, setState] = useState({ clients: null, error: '' })
   useEffect(() => {
@@ -28,7 +28,7 @@ export function ClientPicker({ clients, picked, onToggle }) {
         {/* The click on the box reaches the row, which toggles: one handler, not two. */}
         <Check checked={on} onChange={() => {}} label={c.name} />
         <div style={{ flex: 1 }}>
-          <div className="tt" style={{ fontSize: 15 }}>{c.name}</div>
+          <div className="tt" style={{ fontSize: 15 }}>{c.name}{c.pause && <span className="small dim" style={{ fontWeight: 400 }}> · на паузе</span>}</div>
           <div className="small dim" style={{ lineHeight: 1.35 }}>{c.managed ? 'Без Telegram: рутины добавятся в его дневник' : 'Придёт предложение, подопечный примет сам'}</div>
         </div>
       </div>

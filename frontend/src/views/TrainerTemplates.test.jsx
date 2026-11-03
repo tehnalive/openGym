@@ -204,6 +204,20 @@ describe('a template card', () => {
     expect([...s.querySelectorAll('button')].filter(b => b.textContent === 'Назначить').at(-1).disabled).toBe(true)
   })
 
+  it('names a client on pause and never offers an archived one (pause and archive, section 14)', async () => {
+    mocks.api.mockImplementation(route({
+      'GET /api/trainer/clients': { limit: 5, clients: [CLIENTS.clients[0], { ...CLIENTS.clients[1], pause: { since: '2026-11-01', until: null } }],
+        archived: [{ linkId: 'link-aaaa-3', name: 'Архивный', managed: true, archivedAt: '2026-10-01T00:00:00Z' }] },
+    }))
+    const host = mount(); await flush()
+    click(host.querySelector('.item'))
+    const { host: s } = sheet(); await flush()
+    click(button(s, 'Назначить')); await flush()
+    expect(s.textContent).toContain('Мария · на паузе')
+    expect(s.textContent).not.toContain('Иван · на паузе')
+    expect(s.textContent).not.toContain('Архивный')
+  })
+
   it('renames, and takes a routine out (the last one cannot go)', async () => {
     const { host: s } = await open()
     click(button(s, 'Переименовать'))
