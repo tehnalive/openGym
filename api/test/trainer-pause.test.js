@@ -11,7 +11,7 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { boundPort } from './helpers.mjs';
 import {
-  isPaused, pauseOf, pausedOn, pausedDays, checkPause, startPause, endPause, archiveLink, restoreLink, addDays, reminderDecision, PAUSES_KEEP,
+  isPaused, pauseOf, pausedOn, pausedDays, checkPause, startPause, endPause, archiveLink, restoreLink, addDays, reminderDecision, PAUSES_KEEP, PAUSED_DAYS_MAX, consentCurrent, lifecycleNotice, CONSENT_VERSION,
 } from '../trainer.js';
 
 const API = fileURLToPath(new URL('../', import.meta.url));
@@ -288,7 +288,7 @@ test('archive frees the place, closes the trainer\'s access, and keeps the clien
   // the list: four active, one archived without data; the place is free
   const l = await list(who.coach);
   assert.equal(l.clients.length, 4);
-  assert.deepEqual(l.archived.map(x => Object.keys(x).sort()), [['archivedAt', 'linkId', 'managed', 'name']]);
+  assert.deepEqual(l.archived.map(x => Object.keys(x).sort()), [['archivedAt', 'archivedOn', 'linkId', 'managed', 'name']]);
   assert.equal(l.archived[0].name, 'Вася'); assert.equal(l.archived[0].managed, false);
   const me = (await who.coach.get('/api/trainer/me')).body.trainer;
   assert.equal(me.clients, 4); assert.equal(me.archived, 1);
@@ -424,4 +424,119 @@ test('the audit log has the pause and archive events', async t => {
   const log = fs.readdirSync(app.dir).filter(f => /audit/.test(f)).map(f => fs.readFileSync(path.join(app.dir, f), 'utf8')).join('\n');
   for (const ev of ['trainer.link.pause', 'trainer.link.resume', 'trainer.link.archive', 'trainer.link.restore']) assert.ok(log.includes(ev), ev);
   assert.ok(!log.includes('Травма колена'), 'the reason is not logged');
+});
+
+// ---- the review of pause and archive ----
+
+test('a date that is not on the calendar is a plain 400, not a 500; pausedDays walks at most a year and a bit', async t => {
+  for (const until of ['2026-13-45', '0000-00-00', '2026-00-10', '2026-11-31', '2026-1-1', '']) {
+    assert.equal(checkPause({ until }, '2026-11-03').error, 'until-invalid', until);
+  }
+  assert.equal(pausedDays({ pauses: [{ from: '2026-01-01', to: null }] }, '2026-13-45', '2026-11-03'), 0);
+  assert.equal(pausedDays({ pauses: [{ from: '2026-01-01', to: null }] }, '0000-00-00', '2026-11-03'), 0);
+  const open = { pauses: [{ from: '2000-01-01', to: null }] };
+  assert.equal(pausedDays(open, '2000-01-01', '2026-11-03'), PAUSED_DAYS_MAX, 'a range of twenty-six years counts its last 400 days');
+  assert.equal(pausedDays(open, '2026-11-01', '2026-11-03'), 3);
+
+  const { who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  for (const until of ['2026-13-45', '0000-00-00', '2026-00-10']) {
+    const r = await pause(who.coach, l1, { until });
+    assert.equal(r.status, 400, until); assert.equal(r.body.code, 'until-invalid');
+  }
+});
+
+test('two restores at once cannot both take the last place', async t => {
+  const { app, who } = await world(t);
+  await makeTrainer(who.coach);
+  const ids = {};
+  for (const n of ['c1', 'c2', 'c3', 'c4', 'c5']) ids[n] = await telegramClient(who.coach, who[n]);
+  await setZone(who.coach, ids.c1);
+  assert.equal((await archive(who.coach, ids.c1)).status, 200);
+  assert.equal((await archive(who.coach, ids.c2)).status, 200);
+  await telegramClient(who.coach, who.c6);   // 4 active, 2 archived: one place is free
+  const both = await Promise.all([restore(who.coach, ids.c1), restore(who.coach, ids.c2)]);
+  assert.deepEqual(both.map(r => r.status).sort(), [200, 409], JSON.stringify(both.map(r => r.body)));
+  assert.equal(app.db().trainerLinks.filter(l => l.coachUid === who.coach.id && l.status === 'active').length, 5);
+  assert.equal(app.db().trainerLinks.filter(l => l.coachUid === who.coach.id && l.status === 'archived').length, 1);
+});
+
+test('the archive shows a name and a date, no picture; its count is the list one even for a closed profile', async t => {
+  const { app, who } = await world(t, ['coach', 'c1', 'c2']);
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  const l2 = await telegramClient(who.coach, who.c2);
+  await setZone(who.coach, l1);
+  await archive(who.coach, l1); await archive(who.coach, l2);
+  const l = await list(who.coach);
+  assert.equal(l.archived.length, 2);
+  for (const a of l.archived) {
+    assert.deepEqual(Object.keys(a).sort(), ['archivedAt', 'archivedOn', 'linkId', 'managed', 'name'], 'no avatarUrl: the access is closed');
+    assert.equal(a.archivedOn, TODAY);
+  }
+  assert.equal((await who.coach.get('/api/trainer/me')).body.trainer.archived, 2);
+  const w2 = await restartWith(t, app, ['coach'], db => { db.users.find(u => u.id === who.c2.id).disabled = true; });
+  assert.equal((await list(w2.who.coach)).archived.length, 1);
+  assert.equal((await w2.who.coach.get('/api/trainer/me')).body.trainer.archived, 1, 'the counter and the list agree');
+});
+
+test('the bot words for the archive and the return; an outdated consent has to be given again', async t => {
+  assert.equal(lifecycleNotice('archive', 'Ирина'), 'Тренер Ирина перенёс вас в архив: он не видит ваш дневник.');
+  assert.equal(lifecycleNotice('restore', 'Ирина'), 'Тренер Ирина снова видит ваш дневник по прежнему согласию. Закрыть доступ можно в Настройки → Мой тренер.');
+  assert.equal(consentCurrent({ consentVersion: CONSENT_VERSION }), true);
+  assert.equal(consentCurrent({ consentVersion: CONSENT_VERSION - 1 }), false);
+  assert.equal(consentCurrent({}), false);
+  assert.equal(consentCurrent({ managed: true }), true, 'a client without Telegram gave none');
+  assert.equal(consentCurrent(null), false);
+
+  const { app, who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  const m1 = (await who.coach.post('/api/trainer/managed', { name: 'Мама', ageConfirmed: true })).body.linkId;
+  await setZone(who.coach, l1);
+  assert.equal((await archive(who.coach, l1)).status, 200); assert.equal((await archive(who.coach, m1)).status, 200);
+  const w2 = await restartWith(t, app, ['coach', 'c1'], db => { db.trainerLinks.find(l => l.id === l1).consentVersion = CONSENT_VERSION - 1; });
+  const r = await restore(w2.who.coach, l1);
+  assert.equal(r.status, 409); assert.equal(r.body.code, 'consent-outdated'); assert.equal(r.body.error, 'Подопечному нужно заново принять приглашение');
+  assert.equal(w2.app.db().trainerLinks.find(l => l.id === l1).status, 'archived');
+  assert.equal((await restore(w2.who.coach, m1)).status, 200, 'not for a client without Telegram');
+});
+
+test('the trainer zone is kept only by a request that went through, and by turning the role on again', async t => {
+  const { app, who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  const zone = () => app.db().users.find(u => u.id === who.coach.id).trainer.tz;
+  await setZone(who.coach, l1);
+  assert.equal(zone(), 'UTC');
+  assert.equal((await pause(who.coach, l1, { until: 'nonsense', tz: 'Asia/Tokyo' })).status, 400);
+  assert.equal(zone(), 'UTC', 'a refused request does not move the zone');
+  assert.equal((await pause(who.coach, 'nope-nope-1', { until: null, tz: 'Asia/Tokyo' })).status, 404);
+  assert.equal(zone(), 'UTC');
+  assert.equal((await pause(who.coach, l1, { until: null, tz: 'Asia/Tokyo' })).status, 200);
+  assert.equal(zone(), 'Asia/Tokyo');
+  assert.equal((await who.coach.put('/api/trainer/me', { enabled: true, ageConfirmed: true })).status, 200);
+  assert.equal(zone(), 'Asia/Tokyo', 'turning the role on again keeps the zone');
+});
+
+test('a pause that ran out loses its reason when the list is read', async t => {
+  const { app, who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  await setZone(who.coach, l1);
+  const w2 = await restartWith(t, app, ['coach', 'c1'], db => {
+    db.trainerLinks.find(l => l.id === l1).pause = { since: '2026-10-01T00:00:00.000Z', until: addDays(TODAY, -2), reason: 'Травма колена' };
+  });
+  assert.equal((await list(w2.who.coach)).clients[0].pause, null);
+  assert.equal(w2.app.db().trainerLinks.find(l => l.id === l1).pause, undefined, 'the note is gone from the stored link');
+});
+
+test('pause, resume, archive, restore and schedule share the trainer write limit', async t => {
+  const { who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  let last;
+  for (let i = 0; i < 61; i++) last = await who.coach.del(`/api/trainer/links/${l1}/pause`, { tz: 'UTC' });
+  assert.equal(last.status, 429);
 });

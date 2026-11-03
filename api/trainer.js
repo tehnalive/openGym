@@ -156,13 +156,26 @@ export const reminderText = (name, time) => time ? `Сегодня к вам п�
 //   pauses   [{ from, to, archived? }]    the history, days inclusive, `to` null = still open. The archived time
 //            is recorded here too (`archived: true`), so "was the client expected on this day" is one question:
 //            pausedOn. At most PAUSES_KEEP, the oldest dropped.
+/** Whether the client's consent is of the current text (CONSENT_VERSION). A client without Telegram gave none: always. */
+export const consentCurrent = link => !!link && (link.managed === true || (Number(link.consentVersion) || 0) >= CONSENT_VERSION);
+
+/** The words the bot sends a client when the trainer archives or brings them back. */
+export const lifecycleNotice = (kind, coachName) => kind === 'archive'
+  ? `Тренер ${coachName} перенёс вас в архив: он не видит ваш дневник.`
+  : `Тренер ${coachName} снова видит ваш дневник по прежнему согласию. Закрыть доступ можно в Настройки → Мой тренер.`;
+
 export const PAUSES_KEEP = 50;
 export const PAUSE_MAX_DAYS = 365;
 export const PAUSE_REASON_MAX = 80;
 export const ARCHIVE_LIMIT = 50;           // archived clients a trainer may keep (their diaries stay on the server)
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const validDay = d => typeof d === 'string' && ISO_DATE.test(d) && new Date(d + 'T12:00:00Z').toISOString().slice(0, 10) === d;
+// A real calendar day. Date.parse says NaN for 2026-13-45 or 0000-00-00 (toISOString would throw a RangeError on them).
+const validDay = d => {
+  if (typeof d !== 'string' || !ISO_DATE.test(d)) return false;
+  const at = Date.parse(d + 'T12:00:00Z');
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === d;
+};
 export const addDays = (iso, n) => new Date(Date.parse(iso + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 
 export const archivedLinks = (db, coachUid) => (db.trainerLinks || []).filter(l => l.coachUid === coachUid && l.status === 'archived');
@@ -184,9 +197,13 @@ export function pausedOn(link, iso) {
   return (Array.isArray(link && link.pauses) ? link.pauses : []).some(p => p && p.from <= iso && (p.to == null || iso <= p.to));
 }
 
-/** How many days of the range [from, to] (inclusive, 'YYYY-MM-DD') the client was on pause or archived. */
+export const PAUSED_DAYS_MAX = 400;   // the longest range pausedDays walks; a longer one counts its last PAUSED_DAYS_MAX days
+
+/** How many days of the range [from, to] (inclusive, 'YYYY-MM-DD') the client was on pause or archived. A range longer
+ *  than PAUSED_DAYS_MAX days counts only its last PAUSED_DAYS_MAX (the walk is day by day). */
 export function pausedDays(link, from, to) {
   if (!validDay(from) || !validDay(to) || to < from) return 0;
+  if (Date.parse(to + 'T12:00:00Z') - Date.parse(from + 'T12:00:00Z') >= PAUSED_DAYS_MAX * 86400000) from = addDays(to, -(PAUSED_DAYS_MAX - 1));
   let n = 0;
   for (let d = from; d <= to; d = addDays(d, 1)) if (pausedOn(link, d)) n++;
   return n;

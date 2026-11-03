@@ -30,9 +30,9 @@ import { SHARE_ID_RE, newShareId, checkBundle, authorName, shareLink, shareExpir
 import {
   checkSchedule, reminderDecision, reminderText, TRAINER_CLIENT_LIMIT, CONSENT_VERSION, INVITE_DAYS, INVITE_DEFAULT_DAYS, INVITE_MAX_OPEN, GRANT_KEYS, CLIENT_LIMIT_MESSAGE, TOKEN_RE, ID_RE,
   newToken, newId, hashToken, inviteLink, displayName, isTrainer, activeLinks, archivedLinks, currentLink, inviteState, pruneInvites, checkGrants,
-  trimForTrainer, summaryOf, LABEL_MAX, checkPause, startPause, endPause, archiveLink, restoreLink, pauseOf, ARCHIVE_LIMIT
+  trimForTrainer, summaryOf, LABEL_MAX, checkPause, startPause, endPause, archiveLink, restoreLink, pauseOf, isPaused, ARCHIVE_LIMIT, consentCurrent, lifecycleNotice
 } from './trainer.js';
-import { complianceOf } from './trainer-compliance.js';
+import { complianceOf, dateIn } from './trainer-compliance.js';
 import {
   isManaged, managedLinkFor, managedStateIn, managedStateOut, checkCreate, emptyManagedDoc, applyOps, managedView, managedExport, newManagedId,
 } from './trainer-managed.js';
@@ -2251,6 +2251,12 @@ function trainerCaller(req, res) {
   if (!user.telegramId) { trainerFail(res, 403, 'telegram-required', 'Режим тренера доступен только при входе через Telegram'); return null; }
   return user;
 }
+// A short message to a client who signed in with Telegram, best effort (as the trainer's reminders): the archive and the
+// return change who can see the diary, so the client is told. Nothing for a client without Telegram or a closed profile.
+function tellClient(link, text) {
+  const client = !link.managed && db.users.find(u => u.id === link.clientUid);
+  if (client && !client.disabled && client.telegramId) void sendTelegramNotification(client.telegramId, text);
+}
 // The trainer's date ('YYYY-MM-DD') in their own time zone (set by the app), the server's UTC date if none is known.
 // Pauses and the archive are counted in these days.
 function trainerToday(user) {
@@ -2266,10 +2272,20 @@ function trainerCompliance(user, link, S) {
 }
 // The trainer's day for a request that carries the app's time zone (`tz`): the zone is kept for the reminders, as the
 // schedule does, and the day is counted in it.
-function trainerDayFor(user, body) {
+function bodyZone(body) {
   const tz = body && typeof body.tz === 'string' && body.tz.length <= 64 ? body.tz : '';
-  if (tz && userNow(tz) && user.trainer && user.trainer.tz !== tz) user.trainer = { ...user.trainer, tz };
-  return trainerToday(user);
+  return tz && userNow(tz) ? tz : '';
+}
+// Only reads: a request that is then refused (a bad date, a link gone) must not change the stored zone.
+function trainerDayFor(user, body) {
+  const tz = bodyZone(body);
+  return (tz && userNow(tz).date) || trainerToday(user);
+}
+// Called by the write that went through, right before it saves. Returns the way back, for a save that fails.
+function rememberZone(user, body) {
+  const tz = bodyZone(body), before = user.trainer;
+  if (tz && before && before.tz !== tz) user.trainer = { ...before, tz };
+  return () => { user.trainer = before; };
 }
 // The managed client behind `req.trainerId`, for its own trainer only. Another trainer's, a Telegram client's,
 // a revoked and an unknown id all read the same: not there.
@@ -2447,6 +2463,10 @@ function dataWritable() {
 
 // The Telegram picture of a client who signed in with Telegram, for the trainer of an active link only (the client's
 // consent screen names it). Never for a managed client, who has none; the URL is checked again here as everywhere.
+// The archive as the trainer is shown it: the clients that still exist (the count and the list agree).
+function shownArchive(user) {
+  return archivedLinks(db, user.id).filter(l => { const c = db.users.find(u => u.id === l.clientUid); return c && !c.disabled; });
+}
 function clientAvatar(client, link) {
   const url = link.managed || !client.telegramId ? '' : telegramPhotoUrl(client.telegramPhotoUrl);
   return url ? { avatarUrl: url } : {};
@@ -2660,7 +2680,7 @@ const routes = {
     json(res, 200, {
       consentVersion: CONSENT_VERSION,
       trainer: isTrainer(user) ? {
-        enabled: true, since: user.trainer.since || null, limit: TRAINER_CLIENT_LIMIT, clients: activeLinks(db, user.id).length, archived: archivedLinks(db, user.id).length,
+        enabled: true, since: user.trainer.since || null, limit: TRAINER_CLIENT_LIMIT, clients: activeLinks(db, user.id).length, archived: shownArchive(user).length,
         invites: db.trainerInvites.filter(i => i.coachUid === user.id && inviteState(i) === 'open')
           .map(i => ({ id: i.id, label: i.label || '', created: i.created, expires: i.expires }))
       } : { enabled: false, limit: TRAINER_CLIENT_LIMIT },
@@ -2678,7 +2698,7 @@ const routes = {
     const before = user.trainer;
     if (body.enabled) {
       if (body.ageConfirmed !== true) return trainerFail(res, 400, 'age-required', 'Нужно подтвердить, что вам есть 18 лет');
-      user.trainer = { enabled: true, since: before?.since || new Date().toISOString(), ageConfirmedAt: new Date().toISOString() };
+      user.trainer = { ...before, enabled: true, since: before?.since || new Date().toISOString(), ageConfirmedAt: new Date().toISOString() };
     } else {
       if (activeLinks(db, user.id).length) return trainerFail(res, 409, 'has-clients', 'Сначала завершите связь со всеми подопечными');
       // Archived clients without Telegram keep a diary only this trainer reaches, so they hold the role like active ones.
@@ -2785,6 +2805,13 @@ const routes = {
     if (!user) return;
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const today = trainerToday(user);
+    // A pause that ran out keeps no note of the trainer's about it: its reason goes when the list is read.
+    const lapsed = activeLinks(db, user.id).filter(l => l.pause && !isPaused(l, today));
+    if (lapsed.length) {
+      const kept = lapsed.map(l => l.pause);
+      lapsed.forEach(l => { delete l.pause; });
+      try { saveDb(); } catch { lapsed.forEach((l, i) => { l.pause = kept[i]; }); }   // the lists are still right: isPaused says no
+    }
     const clients = [];
     for (const link of activeLinks(db, user.id)) {
       const client = db.users.find(u => u.id === link.clientUid);
@@ -2798,10 +2825,11 @@ const routes = {
     }
     // The archive: names only, no data (the trainer's access is closed until the client is restored).
     const archived = [];
-    for (const link of archivedLinks(db, user.id)) {
+    // No picture either: the access is closed, and the picture is the client's own to show.
+    for (const link of shownArchive(user)) {
       const client = db.users.find(u => u.id === link.clientUid);
-      if (!client || client.disabled) continue;
-      archived.push({ linkId: link.id, name: displayName(client), managed: link.managed === true, archivedAt: link.archivedAt || null, ...clientAvatar(client, link) });
+      archived.push({ linkId: link.id, name: displayName(client), managed: link.managed === true, archivedAt: link.archivedAt || null,
+        archivedOn: link.archivedAt ? dateIn(link.archivedAt, user.trainer && user.trainer.tz) : null });
     }
     json(res, 200, { clients, archived, limit: TRAINER_CLIENT_LIMIT });
   },
@@ -2991,6 +3019,8 @@ const routes = {
   'PUT /api/trainer/links/{id}/schedule': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
@@ -3001,8 +3031,8 @@ const routes = {
     link.schedule = made.schedule;
     // A new plan is a new day: a reminder that already went today for the old one does not hold the new one back.
     delete link.lastRemindDate;
-    if (typeof body.tz === 'string' && body.tz.length <= 64 && userNow(body.tz)) user.trainer = { ...user.trainer, tz: body.tz };
-    saveDb();
+    const undoZone = rememberZone(user, body);
+    try { saveDb(); } catch (error) { undoZone(); throw error; }
     audit(req, 'trainer.schedule', { user, target: db.users.find(u => u.id === link.clientUid) });
     json(res, 200, { schedule: link.schedule });
   },
@@ -3011,6 +3041,8 @@ const routes = {
   'PUT /api/trainer/links/{id}/pause': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
@@ -3021,21 +3053,28 @@ const routes = {
     if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     const before = JSON.stringify(link);
     startPause(link, made, today, new Date().toISOString());
-    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    const undoZone = rememberZone(user, body);
+    try { saveDb(); } catch (error) { undoZone(); for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
     audit(req, 'trainer.link.pause', { user, target: db.users.find(u => u.id === link.clientUid), msg: made.until || 'open' });
     json(res, 200, { pause: pauseOf(link, today) });
   },
   'DELETE /api/trainer/links/{id}/pause': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
-    const today = trainerDayFor(user, await readBody(req));
+    const body = await readBody(req);
+    // The await above: the link may have been archived or ended meanwhile.
+    if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    const today = trainerDayFor(user, body);
     const was = pauseOf(link, today);
     const before = JSON.stringify(link);
     endPause(link, today);
-    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    const undoZone = rememberZone(user, body);
+    try { saveDb(); } catch (error) { undoZone(); for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
     if (was) audit(req, 'trainer.link.resume', { user, target: db.users.find(u => u.id === link.clientUid) });
     json(res, 200, { pause: null });
   },
@@ -3045,6 +3084,8 @@ const routes = {
   'POST /api/trainer/links/{id}/archive': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
@@ -3053,28 +3094,38 @@ const routes = {
     const before = JSON.stringify(link);
     if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     archiveLink(link, trainerDayFor(user, body), new Date().toISOString());
-    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    const undoZone = rememberZone(user, body);
+    try { saveDb(); } catch (error) { undoZone(); for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
     trainerReadNoted.delete(link.id);
     audit(req, 'trainer.link.archive', { user, target: db.users.find(u => u.id === link.clientUid) });
+    tellClient(link, lifecycleNotice('archive', displayName(user)));
     json(res, 200, { ok: true, archivedAt: link.archivedAt });
   },
   'POST /api/trainer/links/{id}/restore': async (req, res) => {
     const user = trainerCaller(req, res);
     if (!user) return;
+    const wait = TRAINER_WRITES.take(user.id);
+    if (wait) return tooMany(res, wait);
     if (!isTrainer(user)) return trainerFail(res, 403, 'not-trainer', 'Сначала включите роль тренера в настройках');
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'archived' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
-    // The place is taken again: the same limit, the same words as for a new client.
+    const body = await readBody(req);
+    if (!db.trainerLinks.includes(link) || link.status !== 'archived') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
+    // The client agreed to what the consent said then; a text that changed since needs a new invitation (not for a client
+    // without Telegram: there is nobody to ask).
+    if (!consentCurrent(link)) return trainerFail(res, 409, 'consent-outdated', 'Подопечному нужно заново принять приглашение');
+    // The place is taken again: the same limit, the same words as for a new client. Checked after the await and with
+    // nothing awaited between here and the change, so two restores at once cannot both take the last place.
     if (activeLinks(db, user.id).length >= TRAINER_CLIENT_LIMIT) {
       audit(req, 'trainer.link.fail', { ok: false, user, msg: 'client-limit' });
       return trainerFail(res, 409, 'client-limit', CLIENT_LIMIT_MESSAGE, { limit: TRAINER_CLIENT_LIMIT });
     }
-    const body = await readBody(req);
-    if (!db.trainerLinks.includes(link) || link.status !== 'archived') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     const before = JSON.stringify(link);
     restoreLink(link, trainerDayFor(user, body));
-    try { saveDb(); } catch (error) { for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
+    const undoZone = rememberZone(user, body);
+    try { saveDb(); } catch (error) { undoZone(); for (const k of Object.keys(link)) delete link[k]; Object.assign(link, JSON.parse(before)); throw error; }
     audit(req, 'trainer.link.restore', { user, target: db.users.find(u => u.id === link.clientUid) });
+    tellClient(link, lifecycleNotice('restore', displayName(user)));
     json(res, 200, { ok: true });
   },
   'DELETE /api/trainer/links/{id}': async (req, res) => {
