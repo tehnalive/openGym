@@ -294,7 +294,10 @@ describe('a Telegram client read only', () => {
 
   it('keeps the plan compliance the document answer carries, for the trainer\'s Home, and tells the screen', async () => {
     const C = { d7: { planned: 6, done: 5, pct: 83 }, hasSchedule: true }
-    const real = vi.fn(async url => new Response(JSON.stringify(String(url).endsWith('/doc') ? { state: { workouts: [] }, rev: 7, compliance: C } : { rev: 7 })))
+    const C2 = { d7: { planned: 6, done: 6, pct: 100 }, hasSchedule: true }
+    let revCompliance
+    const real = vi.fn(async url => new Response(JSON.stringify(String(url).endsWith('/doc') ? { state: { workouts: [] }, rev: 7, compliance: C }
+      : { rev: 7, ...(revCompliance ? { compliance: revCompliance } : {}) })))
     const win = fakeWindow({ fetchImpl: real })
     installManagedGuards(win, RO)
     const heard = vi.fn(); const off = subscribeCompliance(heard)
@@ -303,12 +306,17 @@ describe('a Telegram client read only', () => {
     await new Promise(r => setTimeout(r, 0))
     expect(readonlyCompliance()).toEqual(C)
     expect(heard).toHaveBeenCalledTimes(1)
-    await win.fetch('/api/data/rev')   // the revision poll carries no compliance: it is not wiped
+    await win.fetch('/api/data/rev')   // a poll that carries none is not a wipe
     await new Promise(r => setTimeout(r, 0))
     expect(readonlyCompliance()).toEqual(C)
     await win.fetch('/api/data')   // the same answer again is not a change
     await new Promise(r => setTimeout(r, 0))
     expect(heard).toHaveBeenCalledTimes(1)
+    revCompliance = C2   // the revision poll carries the tiles: they follow the diary without the document being read again
+    await win.fetch('/api/data/rev')
+    await new Promise(r => setTimeout(r, 0))
+    expect(readonlyCompliance()).toEqual(C2)
+    expect(heard).toHaveBeenCalledTimes(2)
     off()
   })
 

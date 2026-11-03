@@ -37,10 +37,10 @@ async function start(t, existing) {
   const dir = existing || fs.mkdtempSync(path.join(os.tmpdir(), 'gym-pause-'));
   if (!existing) fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ users: [], creds: [], subs: [], invites: [] }));
   let tail = '';
-  const childEnv = { ...process.env, PORT: '0', DATA_DIR: dir, ORIGIN, RP_ID: 'gym.example.test', TELEGRAM_BOT_TOKEN: TOKEN,
+  const childEnv = { ...process.env, TG_STUB_LOG: path.join(dir, 'telegram-sent.log'), PORT: '0', DATA_DIR: dir, ORIGIN, RP_ID: 'gym.example.test', TELEGRAM_BOT_TOKEN: TOKEN,
     INVITE_ONLY: '0', FIRST_USER_ADMIN: '0', PASSWORD_LOGIN: '0', COACH_DISABLED: '1', AUDIT_LOG: '1', ADMIN_UIDS: '' };
   delete childEnv.TELEGRAM_ALLOWED_IDS;
-  const child = spawn(process.execPath, ['server.js'], { cwd: API, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(process.execPath, ['--import', new URL('./telegram-fetch-stub.mjs', import.meta.url).href, 'server.js'], { cwd: API, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   child.stdout.on('data', c => { tail = (tail + c).slice(-16000); });
   child.stderr.on('data', c => { tail = (tail + c).slice(-16000); });
   const stop = async () => {
@@ -56,7 +56,12 @@ async function start(t, existing) {
     return { status: r.status, body: text ? JSON.parse(text) : null, text,
       cookie: r.headers.getSetCookie().map(v => v.split(';')[0]).filter(v => !v.endsWith('=')).join('; ') };
   };
-  return { dir, call, stop, db: () => JSON.parse(fs.readFileSync(path.join(dir, 'db.json'), 'utf8')) };
+  // What the bot was asked to send since the server started (api.telegram.org is answered by telegram-fetch-stub.mjs).
+  const sent = async () => {
+    await new Promise(r => setTimeout(r, 50));   // the send is not awaited by the route
+    try { return fs.readFileSync(path.join(dir, 'telegram-sent.log'), 'utf8').split(/\r?\n/).filter(Boolean).map(l => JSON.parse(l)); } catch { return []; }
+  };
+  return { dir, call, stop, sent, db: () => JSON.parse(fs.readFileSync(path.join(dir, 'db.json'), 'utf8')) };
 }
 
 async function world(t, names = Object.keys(TG), existing) {
@@ -403,6 +408,7 @@ test('the archive has a ceiling', async t => {
   await makeTrainer(first.who.coach);
   const l1 = await telegramClient(first.who.coach, first.who.c1);
   const { app, who } = await restartWith(t, first.app, ['coach', 'c1'], db => {
+    for (let i = 0; i < 50; i++) db.users.push({ id: 'gone-' + i, name: 'Filler ' + i });
     for (let i = 0; i < 50; i++) db.trainerLinks.push({ id: 'filler-' + i + '-xx', coachUid: db.users.find(u => u.telegramId).id, clientUid: 'gone-' + i, status: 'archived', managed: true, grants: {} });
   });
   const over = await archive(who.coach, l1);
@@ -498,7 +504,7 @@ test('the bot words for the archive and the return; an outdated consent has to b
   assert.equal((await archive(who.coach, l1)).status, 200); assert.equal((await archive(who.coach, m1)).status, 200);
   const w2 = await restartWith(t, app, ['coach', 'c1'], db => { db.trainerLinks.find(l => l.id === l1).consentVersion = CONSENT_VERSION - 1; });
   const r = await restore(w2.who.coach, l1);
-  assert.equal(r.status, 409); assert.equal(r.body.code, 'consent-outdated'); assert.equal(r.body.error, 'Подопечному нужно заново принять приглашение');
+  assert.equal(r.status, 409); assert.equal(r.body.code, 'consent-outdated'); assert.equal(r.body.error, 'Подопечному нужно заново принять приглашение. Завершите связь и отправьте новое приглашение.');
   assert.equal(w2.app.db().trainerLinks.find(l => l.id === l1).status, 'archived');
   assert.equal((await restore(w2.who.coach, m1)).status, 200, 'not for a client without Telegram');
 });
@@ -539,4 +545,60 @@ test('pause, resume, archive, restore and schedule share the trainer write limit
   let last;
   for (let i = 0; i < 61; i++) last = await who.coach.del(`/api/trainer/links/${l1}/pause`, { tz: 'UTC' });
   assert.equal(last.status, 429);
+});
+
+test('the bot tells a Telegram client about the archive and the return, and nobody else, and not when the call is refused', async t => {
+  const { app, who } = await world(t);
+  await makeTrainer(who.coach);
+  const ids = {};
+  for (const n of ['c1', 'c2', 'c3', 'c4', 'c5']) ids[n] = await telegramClient(who.coach, who[n]);
+  await setZone(who.coach, ids.c1);
+  const asked = async () => (await app.sent()).filter(m => m.method === 'sendMessage' && /перенёс вас в архив|снова видит ваш дневник/.test(m.text || ''));
+  assert.deepEqual(await asked(), []);
+
+  // archive: one message, to that client, with the trainer's name
+  assert.equal((await archive(who.coach, ids.c1)).status, 200);
+  let m = await asked();
+  assert.equal(m.length, 1);
+  assert.equal(String(m[0].chat_id), String(TG.c1));
+  assert.equal(m[0].text, lifecycleNotice('archive', 'Ирина'));
+
+  // a refused archive (an unknown link, another status) says nothing
+  assert.equal((await archive(who.coach, 'nope-nope-1')).status, 404);
+  assert.equal((await archive(who.coach, ids.c1)).status, 404, 'already archived');
+  assert.equal((await asked()).length, 1);
+
+  // restore refused for the limit: nothing sent
+  const six = await telegramClient(who.coach, who.c6);   // takes the freed place
+  const full = await restore(who.coach, ids.c1);
+  assert.equal(full.body.code, 'client-limit');
+  assert.equal((await asked()).length, 1, 'no message for a refused return');
+
+  // restore refused for an outdated consent: nothing sent either
+  assert.equal((await who.coach.del(`/api/trainer/links/${six}`)).status, 200);
+  const w2 = await restartWith(t, app, ['coach', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'], db => { db.trainerLinks.find(l => l.id === ids.c1).consentVersion = CONSENT_VERSION - 1; });
+  assert.equal((await restore(w2.who.coach, ids.c1)).body.code, 'consent-outdated');
+  assert.equal((await w2.app.sent()).filter(x => /снова видит/.test(x.text || '')).length, 0);
+
+});
+
+test('no message for a client without Telegram, when the trainer archives and brings them back', async t => {
+  const { app, who } = await world(t, ['coach']);
+  await makeTrainer(who.coach);
+  const m1 = (await who.coach.post('/api/trainer/managed', { name: 'Мама', ageConfirmed: true })).body.linkId;
+  await setZone(who.coach, m1);
+  assert.equal((await archive(who.coach, m1)).status, 200);
+  assert.equal((await restore(who.coach, m1)).status, 200);
+  assert.deepEqual((await app.sent()).filter(x => x.method === 'sendMessage' && /архив|снова видит/.test(x.text || '')), []);
+});
+
+test('the return of a client with Telegram sends the words of the return', async t => {
+  const { app, who } = await world(t, ['coach', 'c1']);
+  await makeTrainer(who.coach);
+  const l1 = await telegramClient(who.coach, who.c1);
+  await setZone(who.coach, l1);
+  assert.equal((await archive(who.coach, l1)).status, 200);
+  assert.equal((await restore(who.coach, l1)).status, 200);
+  const texts = (await app.sent()).filter(x => String(x.chat_id) === String(TG.c1)).map(x => x.text);
+  assert.deepEqual(texts, [lifecycleNotice('archive', 'Ирина'), lifecycleNotice('restore', 'Ирина')]);
 });

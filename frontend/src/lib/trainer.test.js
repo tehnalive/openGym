@@ -226,7 +226,7 @@ describe('plan compliance wording', () => {
     ]
     const items = attentionItems(clients)
     expect(items.map(x => x.text)).toEqual([
-      'Юра: ещё не тренировался', 'Олег: не тренировался 20 дн.', 'Иван: не тренировался 9 дн.', 'Мария: соблюдение за неделю упало до 40%'])
+      'Юра: ещё нет тренировок', 'Олег: нет тренировок 20 дн.', 'Иван: нет тренировок 9 дн.', 'Мария: соблюдение за неделю упало до 40%'])
     expect(items.every(x => !x.text.includes('—'))).toBe(true)
     expect(sortByAttention(clients).map(c => c.name)).toEqual(['Юра', 'Олег', 'Иван', 'Мария', 'Анна', 'Ира', 'Лена'])
     expect(attentionItems(null)).toEqual([])

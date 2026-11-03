@@ -150,7 +150,7 @@ describe('TrainerHome: plan compliance', () => {
     const host = mount(routes, '/trainer')
     await flush()
     const card = host.querySelector('[aria-label="Нужно внимание"]')
-    expect(card.textContent).toContain('Иван: не тренировался 9 дн.')
+    expect(card.textContent).toContain('Иван: нет тренировок 9 дн.')
     expect(card.textContent).toContain('Мария: соблюдение за неделю упало до 40%')
     expect(card.textContent).not.toContain('Анна')
     expect(card.textContent).not.toContain('Олег')
@@ -158,6 +158,18 @@ describe('TrainerHome: plan compliance', () => {
     expect(names).toEqual(['Иван', 'Мария', 'Анна', 'Олег'])
     click(card.querySelector('[role=button]'))   // opens the client
     expect(mocks.enterRo).toHaveBeenCalledWith('link-dddd-4', 'Иван', expect.any(String), expect.anything())
+  })
+
+  it('the attention line opens the client with Enter and with Space', async () => {
+    mocks.api.mockImplementation(apiFor({ '/api/trainer/me': ME, '/api/trainer/clients': ROWS }))
+    const host = mount(routes, '/trainer')
+    await flush()
+    const line = host.querySelector('[aria-label="Нужно внимание"] [role=button]')
+    for (const key of ['Enter', ' ']) {
+      mocks.enterRo.mockClear()
+      act(() => { line.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })) })
+      expect(mocks.enterRo).toHaveBeenCalledWith('link-dddd-4', 'Иван', expect.any(String), expect.anything())
+    }
   })
 
   it('has no such card when nobody needs a look, and nothing when the history is closed', async () => {

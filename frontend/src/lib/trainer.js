@@ -227,7 +227,7 @@ export function attentionItems(clients) {
     const a = c.compliance && !c.pause ? c.compliance.attention : null
     if (a === 'quiet') {
       const n = c.compliance.daysSinceLast
-      quiet.push({ linkId: c.linkId, name: c.name, kind: 'quiet', days: n, text: n == null ? `${c.name}: ещё не тренировался` : `${c.name}: не тренировался ${n} дн.`, client: c })
+      quiet.push({ linkId: c.linkId, name: c.name, kind: 'quiet', days: n, text: n == null ? `${c.name}: ещё нет тренировок` : `${c.name}: нет тренировок ${n} дн.`, client: c })
     } else if (a === 'drop') {
       drop.push({ linkId: c.linkId, name: c.name, kind: 'drop', pct: c.compliance.d7.pct, text: `${c.name}: соблюдение за неделю упало до ${c.compliance.d7.pct}%`, client: c })
     }

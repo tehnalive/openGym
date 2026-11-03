@@ -10,7 +10,7 @@ export function AttentionCard({ items, onOpen }) {
   return <div className="card" style={{ marginBottom: 12 }} aria-label="Нужно внимание">
     <div className="tt" style={{ marginBottom: 6 }}>Нужно внимание</div>
     {items.map(x => <div key={x.linkId} className="row" role="button" tabIndex={0} style={{ padding: '6px 0', gap: 8, alignItems: 'center', cursor: 'pointer' }}
-      onClick={() => onOpen(x.client)} onKeyDown={e => { if (e.key === 'Enter') onOpen(x.client) }}>
+      onClick={() => onOpen(x.client)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(x.client) } }}>
       <span style={{ color: 'var(--red)', display: 'inline-flex' }}><Icon name="bell" /></span>
       <span style={{ flex: 1, lineHeight: 1.35 }}>{x.text}</span>
       <Icon name="chevronRight" className="chev" />

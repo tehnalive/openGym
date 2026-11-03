@@ -3005,7 +3005,8 @@ const routes = {
     const t = telegramClientTarget(req, res, user);
     if (!t) return;
     const doc = readStateCached(t.client.id);
-    json(res, 200, { rev: doc?._rev || 0, ...(doc?._wid ? { wid: doc._wid } : {}) });
+    // The plan compliance rides on the poll (a few dozen days of arithmetic), so the read only app's tiles follow the diary.
+    json(res, 200, { rev: doc?._rev || 0, ...(doc?._wid ? { wid: doc._wid } : {}), compliance: trainerCompliance(user, t.link, doc) });
   },
   'GET /api/trainer/clients/{id}/data': async (req, res) => {
     const user = trainerCaller(req, res);
@@ -3366,7 +3367,7 @@ const routes = {
     const link = ID_RE.test(req.trainerId || '') ? db.trainerLinks.find(l => l.id === req.trainerId && l.status === 'active' && l.coachUid === user.id) : null;
     if (!link) return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     const body = await readBody(req);
-    if (archivedLinks(db, user.id).length >= ARCHIVE_LIMIT) return trainerFail(res, 409, 'archive-limit', 'В архиве слишком много подопечных, удалите ненужных', { limit: ARCHIVE_LIMIT });
+    if (shownArchive(user).length >= ARCHIVE_LIMIT) return trainerFail(res, 409, 'archive-limit', 'В архиве слишком много подопечных, удалите ненужных', { limit: ARCHIVE_LIMIT });
     const before = JSON.stringify(link);
     if (!db.trainerLinks.includes(link) || link.status !== 'active') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     archiveLink(link, trainerDayFor(user, body), new Date().toISOString());
@@ -3389,7 +3390,7 @@ const routes = {
     if (!db.trainerLinks.includes(link) || link.status !== 'archived') return trainerFail(res, 404, 'link-gone', 'Связь не найдена');
     // The client agreed to what the consent said then; a text that changed since needs a new invitation (not for a client
     // without Telegram: there is nobody to ask).
-    if (!consentCurrent(link)) return trainerFail(res, 409, 'consent-outdated', 'Подопечному нужно заново принять приглашение');
+    if (!consentCurrent(link)) return trainerFail(res, 409, 'consent-outdated', 'Подопечному нужно заново принять приглашение. Завершите связь и отправьте новое приглашение.');
     // The place is taken again: the same limit, the same words as for a new client. Checked after the await and with
     // nothing awaited between here and the change, so two restores at once cannot both take the last place.
     if (activeLinks(db, user.id).length >= TRAINER_CLIENT_LIMIT) {
