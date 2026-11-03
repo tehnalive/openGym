@@ -55,6 +55,18 @@ const PRESENCE = [
   ['Managed diary: no exercise library tab', 'frontend/src/components/TabBar.jsx', 'has', 'isManagedMode()'],
   ['Read only diary: client document route', 'api/openapi.yaml', 'has', '/api/trainer/clients/{id}/doc:'],
   ['Read only diary: routes in App', 'frontend/src/App.jsx', 'has', 'readonlyRoutes'],
+  ['Pause and archive: pause route', 'api/server.js', 'has', "'PUT /api/trainer/links/{id}/pause'"],
+  ['Pause and archive: resume route', 'api/server.js', 'has', "'DELETE /api/trainer/links/{id}/pause'"],
+  ['Pause and archive: archive route', 'api/server.js', 'has', "'POST /api/trainer/links/{id}/archive'"],
+  ['Pause and archive: restore route', 'api/server.js', 'has', "'POST /api/trainer/links/{id}/restore'"],
+  ['Pause and archive: routes in openapi.yaml', 'api/openapi.yaml', 'has', '/api/trainer/links/{id}/restore:'],
+  ['Pause and archive: history for the plan statistics', 'api/trainer.js', 'has', 'export function pausedOn'],
+  ['Pause and archive: cabinet screen', 'frontend/src/components/TrainerLifecycle.jsx', 'has', 'export const ARCHIVE_CONFIRM'],
+  ['Plan compliance: the formula', 'api/trainer-compliance.js', 'has', 'export function complianceOf'],
+  ['Plan compliance: API image ships it', 'api/Dockerfile', 'has', 'trainer-compliance.js'],
+  ['Plan compliance: only with the history grant', 'api/server.js', 'has', 'function trainerCompliance'],
+  ['Plan compliance: in openapi.yaml', 'api/openapi.yaml', 'has', 'TrainerCompliance:'],
+  ['Plan compliance: cabinet card', 'frontend/src/views/TrainerHome.jsx', 'has', '<AttentionCard'],
   ['Trainer mode: settings card', 'frontend/src/views/Settings.jsx', 'has', '<TrainerSettings />'],
   ['Removed: check-in screen', 'frontend/src/App.jsx', 'not', 'views/CheckIn.jsx'],
   ['Removed: progress photos screen', 'frontend/src/App.jsx', 'not', 'views/ProgressPhotos.jsx'],
@@ -67,10 +79,12 @@ const FRONTEND_TESTS = [
   'src/store/useStore.telegram.test.jsx',
   'src/lib/trainer.test.js', 'src/components/TrainerConsent.test.jsx', 'src/views/Trainer.test.jsx', 'src/lib/plan-link.test.js',
   'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx', 'src/lib/managed-mode.test.js', 'src/components/ManagedBar.test.jsx', 'src/views/ReadonlyDiary.test.jsx',
+  'src/views/TrainerPauseArchive.test.jsx', 'src/components/TrainerSchedule.test.jsx',
 ]
 const API_TESTS = [
   'test/fork-routes.test.js', 'test/server-telegram-only.test.js', 'test/telegram-login.test.js', 'test/openapi-routes.test.js',
   'test/trainer.test.js', 'test/trainer-managed.test.js',
+  'test/trainer-pause.test.js', 'test/trainer-compliance.test.js', 'test/trainer-compliance-routes.test.js',
 ]
 
 const failures = []

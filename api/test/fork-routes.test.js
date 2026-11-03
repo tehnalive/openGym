@@ -75,25 +75,43 @@ test('the only client document a trainer writes is a managed one, through commit
   assert.ok(!/atomicWrite|writeState|stateCache/.test(code), 'managed routes write by hand');
   for (const m of code.matchAll(/commitState\(([^,]+),/g)) assert.ok(/^(t\.client|client)$/.test(m[1].trim()), 'commitState on ' + m[1]);
   // Every managed route except the one that creates the profile first resolves the owner's own managed link.
-  for (const key of ["'GET /api/trainer/managed/{id}'", "'POST /api/trainer/managed/{id}/ops'", "'GET /api/trainer/managed/{id}/export'", "'DELETE /api/trainer/managed/{id}'",
-    "'GET /api/trainer/managed/{id}/data'", "'PUT /api/trainer/managed/{id}/data'", "'GET /api/trainer/managed/{id}/data/rev'"]) {
+  // The diary routes open an ACTIVE client only: managedTarget(req, res, user) with no list of statuses. Only the export and
+  // the delete may name statuses (an archived client's diary can still be saved and erased), and exactly these two.
+  const routeBody = key => {
     const at = code.indexOf(key);
     assert.ok(at >= 0, key);
-    assert.ok(/managedTarget\(req, res, user[,)]/.test(code.slice(at, at + 700)), key + ' does not call managedTarget');
+    const next = code.indexOf('\n  \'', at + key.length);
+    return code.slice(at, next > 0 ? next : undefined);
+  };
+  for (const key of ["'GET /api/trainer/managed/{id}'", "'POST /api/trainer/managed/{id}/ops'", "'GET /api/trainer/managed/{id}/data'", "'PUT /api/trainer/managed/{id}/data'", "'GET /api/trainer/managed/{id}/data/rev'"]) {
+    assert.ok(/managedTarget\(req, res, user\)/.test(routeBody(key)), key + ' must call managedTarget(req, res, user) with no statuses');
   }
+  for (const key of ["'GET /api/trainer/managed/{id}/export'", "'DELETE /api/trainer/managed/{id}'"]) {
+    assert.ok(/managedTarget\(req, res, user, \['active', 'archived'\]\)/.test(routeBody(key)), key + ' may open an archived client, and only with exactly [active, archived]');
+  }
+  assert.equal([...code.matchAll(/managedTarget\(req, res, user, /g)].length, 2, 'only the export and the delete name statuses');
   // A managed profile has no session, no sign-in, no reminders.
   assert.match(server, /if \(isManaged\(user\)\) return null;/);
 });
 
 test('pause and archive routes change the link only: no state file, and only the trainer\'s own link', () => {
-  for (const key of ["'PUT /api/trainer/links/{id}/pause'", "'DELETE /api/trainer/links/{id}/pause'", "'POST /api/trainer/links/{id}/archive'", "'POST /api/trainer/links/{id}/restore'"]) {
+  // Pause, resume and archive open an ACTIVE link; restore an ARCHIVED one: not the other way round, and not either.
+  const wants = { "'PUT /api/trainer/links/{id}/pause'": 'active', "'DELETE /api/trainer/links/{id}/pause'": 'active', "'POST /api/trainer/links/{id}/archive'": 'active', "'POST /api/trainer/links/{id}/restore'": 'archived' };
+  for (const [key, status] of Object.entries(wants)) {
     const at = server.indexOf(key);
     assert.ok(at > 0, key);
     const body = server.slice(at, server.indexOf('\n  },\n', at));
     assert.ok(!/stateFile|atomicWrite|writeState|stateCache|commitState|readStateStrict/.test(body), key + ' touches a state file');
     assert.ok(/l\.coachUid === user\.id/.test(body), key + ' does not pin the link to its trainer');
-    assert.ok(/status === '(active|archived)'/.test(body), key + ' does not check the link status');
+    assert.ok(body.includes(`l.status === '${status}'`), key + ` must find the link with status '${status}'`);
+    assert.ok(!body.includes(`l.status === '${status === 'active' ? 'archived' : 'active'}'`), key + ' names the other status in its lookup');
+    assert.ok(body.includes('TRAINER_WRITES.take(user.id)'), key + ' has no write limit');
   }
+  // The client's data (and the trimmed document) is read for an ACTIVE link only.
+  const dataAt = server.indexOf("'GET /api/trainer/clients/{id}/data'");
+  const dataBody = server.slice(dataAt, server.indexOf('\n  },\n', dataAt));
+  assert.match(dataBody, /l\.status === 'active'/);
+  assert.ok(!/archived/.test(dataBody), 'an archived client\'s data must not open');
   // The access to a Telegram client stays active-only: an archived link reads as not there.
   const target = server.slice(server.indexOf('function telegramClientTarget'), server.indexOf('function commitState'));
   assert.match(target, /l\.status === 'active'/);
