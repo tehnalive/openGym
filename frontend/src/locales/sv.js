@@ -2635,4 +2635,5 @@ export default {
   'Just for this phone. Some home screens take a moment to catch up.': 'Bara för den här telefonen. Vissa hemskärmar behöver en stund på sig att hänga med.',
   'The icon could not be changed.': 'Ikonen gick inte att byta.',
   'Try the Halloween app icon': 'Testa Halloween-appikonen',
+  'Written by the trainer': 'Inlagt av tränaren',
 }

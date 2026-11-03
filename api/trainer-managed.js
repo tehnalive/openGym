@@ -60,14 +60,17 @@ export function hasDiary(S) {
 
 // Media never travels in an operation: the trainer cannot attach a photo to someone else's diary.
 const STRIP = new Set(['media', 'photo', 'photos', 'video', 'videos', 'img', 'image', '_f', '_u', 'by', 'via']);
-function stripDeep(v, depth = 0) {
+// The mark «written by the trainer» (`via`, `by`) is the server's: an incoming operation cannot carry it (STRIP). What the
+// server holds goes out with the diary (the trainer's view, the export) as `via` only; `by` is a profile id and stays inside.
+const KEEP_MARKS = new Set([...STRIP].filter(k => k !== 'via'));
+function stripDeep(v, depth = 0, drop = STRIP) {
   if (depth > 8) return undefined;
-  if (Array.isArray(v)) return v.map(x => stripDeep(x, depth + 1)).filter(x => x !== undefined);
+  if (Array.isArray(v)) return v.map(x => stripDeep(x, depth + 1, drop)).filter(x => x !== undefined);
   if (isRec(v)) {
     const out = {};
     for (const [k, x] of Object.entries(v)) {
-      if (STRIP.has(k) || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-      const y = stripDeep(x, depth + 1);
+      if (drop.has(k) || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+      const y = stripDeep(x, depth + 1, drop);
       if (y !== undefined) out[k] = y;
     }
     return out;
@@ -103,9 +106,51 @@ function cleanWorkout(raw, now) {
   for (const k of ['start', 'end']) if (w[k] != null && !num(w[k], 0, 8.64e15)) return { error: 'workout-invalid', text: 'Время тренировки неверно' };
   if (w.name != null) w.name = plainText(w.name, 80);
   if (w.note != null) w.note = plainText(w.note, 500);
-  w.via = 'coach';
-  w._ts = now;
+  w._ts = now;   // the mark `via`/`by` is set by applyCoachMarks, in commitState
   return { workout: w };
+}
+
+// ---- the mark «written by the trainer» (TG14, section 16) ----
+export const COACH_VIA = 'coach';
+const MARK_META = new Set(['_ts', '_f', '_u', 'via', 'by']);
+const sorted = v => (Array.isArray(v) ? v.map(sorted) : isRec(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sorted(v[k])])) : v);
+const sameContent = (a, b) => {
+  const cut = o => Object.fromEntries(Object.entries(o).filter(([k]) => !MARK_META.has(k)));
+  return JSON.stringify(sorted(cut(a))) === JSON.stringify(sorted(cut(b)));
+};
+const markOf = w => (isRec(w) && w.via === COACH_VIA ? { via: COACH_VIA, ...(typeof w.by === 'string' && w.by && w.by.length <= 64 ? { by: w.by } : {}) } : null);
+
+/**
+ * Settles the `via`/`by` mark of every workout in `next` against the stored document `cur`; mutates `next`.
+ * The mark is the server's field, not the writer's:
+ *  - a workout the stored copy marks keeps that mark, whatever the writer sent (or left out);
+ *  - `coachUid` set (the trainer writing a managed client's diary): a workout the stored copy lacks, or whose content
+ *    changed, gets `via: 'coach'` and `by: coachUid`; an unchanged one gets no mark it did not have;
+ *  - no `coachUid` (the person's own PUT /api/data): the mark cannot be added to a workout the stored copy holds
+ *    unmarked. A workout new to the stored copy keeps the mark it arrives with (a copy exported from a trainer's
+ *    diary and imported again); `by` is only kept next to it. The mark is a label, it grants nothing.
+ * `stamped`: the writer stamps its own fields (`_f`), so a mark given to a changed workout is stamped like an edit.
+ */
+export function applyCoachMarks(cur, next, { coachUid = null, stamped = false, now = Date.now(), report = null } = {}) {
+  if (!isRec(next) || !Array.isArray(next.workouts)) return next;
+  // A workout without an id is known by its day and start (`key`), as applyOps files it.
+  const stored = new Map(list(cur?.workouts).filter(isRec).map(x => [String(key(x)), x]));
+  for (const w of next.workouts) {
+    if (!isRec(w)) continue;
+    const old = stored.get(String(key(w)));
+    const had = markOf(old), sent = markOf(w), sentVia = w.via;
+    delete w.via; delete w.by;
+    if (had) Object.assign(w, had);
+    else if (coachUid) {
+      if (!old || !sameContent(old, w)) {
+        w.via = COACH_VIA; w.by = String(coachUid);
+        if (old && stamped) { const at = Math.max(Number(w._ts) || 0, now); w._f = { ...(isRec(w._f) ? w._f : {}), via: at, by: at }; }
+      }
+    } else if (!old && sent) w.via = COACH_VIA;   // `by` is the trainer's and stays on the server
+    // What the writer sent differs from what the server holds: it has to read the document again.
+    if (report && sentVia !== w.via) report.changed = true;
+  }
+  return next;
 }
 
 const round1 = n => Math.round(n * 10) / 10;
@@ -205,7 +250,7 @@ export function applyOps(S, ops, now = Date.now()) {
 /** What a trainer gets back for a managed client: its diary without bookkeeping or media. */
 export function managedView(S) {
   const doc = isRec(S) ? S : {};
-  const strip = x => stripDeep(x);
+  const strip = x => stripDeep(x, 0, KEEP_MARKS);
   return {
     unit: doc.unit === 'lb' ? 'lb' : 'kg',
     weekStart: doc.weekStart === 0 ? 0 : 1,
@@ -255,5 +300,9 @@ function withoutPersonal(S) {
 
 /** A document pushed by the trainer's app, ready for commitState. */
 export const managedStateIn = withoutPersonal;
-/** A client's document on its way to the trainer's app. */
-export const managedStateOut = withoutPersonal;
+/** A client's document on its way to the trainer's app: the mark `via` stays, `by` (a profile id) does not travel. */
+export function managedStateOut(S) {
+  const out = withoutPersonal(S);
+  if (Array.isArray(out.workouts)) out.workouts = out.workouts.map(w => { if (isRec(w) && 'by' in w) { const { by, ...rest } = w; return rest; } return w; });
+  return out;
+}

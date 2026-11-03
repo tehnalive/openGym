@@ -26,6 +26,7 @@ import ExerciseAliasesEditor, { ExerciseAliasesField, ExerciseAliasesLink } from
 import { SG_NAME_MAX } from './lib/superset-meta.js'
 import { REST_MAX, fmtRest, restWheelValue } from './lib/duration.js'
 import Icon from './components/Icon.jsx'
+import CoachMark from './components/CoachMark.jsx'
 import { SeasonDeco } from './components/Seasonal.jsx'
 import { Button, Slider, Switch, Segmented, SelectRow, Row, TextField, NumberField, MultiSelectRow } from './components/ui.jsx'
 import { glyphOf, GLYPH_GROUPS, DEFAULT_GLYPH } from './lib/glyphs.js'
@@ -2868,6 +2869,8 @@ function WorkoutDetail({ w, close }) {
         {entryRows(g.units)}
       </div>
     }) : entryRows(groups[0]?.units || [])}
+    {/* Written by the trainer (TG14, section 16): the mark the server put on the workout. */}
+    {w.via === 'coach' && <div style={{ margin: '0 0 8px' }}><CoachMark w={w} /></div>}
     {/* Progress photos and form-check videos: added and removed right here, on the saved record. */}
     <WorkoutMediaSection w={w} />
     <div className="small muted" style={{ margin: '4px 0 6px' }}>{t('Session note')}</div>
@@ -3091,6 +3094,7 @@ export function WorkoutRow({ w, onClick }) {
     <span className="lrow-i" style={{ width: 34, height: 34, borderRadius: 8, fontSize: 19 }}><Icon name={glyph} /></span>
     <div className="grow"><div className="tt">{w.name}</div>
       <div className="ss">{[fmtDate(w.d, true), ...durPart(w.end - w.start), tn('{0} set', '{0} sets', setsDone(w)), fmtVol(sessionVolume(w, st), st.unit)].join(' · ')}</div></div>
+    <CoachMark w={w} />
     {mediaN > 0 && <span className="wrow-media" title={tn('{0} photo or video', '{0} photos or videos', mediaN)} aria-label={tn('{0} photo or video', '{0} photos or videos', mediaN)}><Icon name="image" />{mediaN}</span>}
     {w.prs && w.prs.length > 0 && <span className="pr"><Icon name="trophy" />{w.prs.length} PR</span>}
     <Icon name="chevronRight" className="chev" />

@@ -42,7 +42,10 @@ for (const route of ['GET /api/trainer/me', 'PUT /api/trainer/me', 'POST /api/tr
   'GET /api/trainer/managed/{id}/export',
   'GET /api/trainer/managed/{id}/data', 'PUT /api/trainer/managed/{id}/data', 'GET /api/trainer/managed/{id}/data/rev',
   'GET /api/trainer/clients/{id}/doc', 'GET /api/trainer/clients/{id}/doc/rev',
-  'PUT /api/trainer/links/{id}/pause', 'DELETE /api/trainer/links/{id}/pause', 'POST /api/trainer/links/{id}/archive', 'POST /api/trainer/links/{id}/restore']) {
+  'PUT /api/trainer/links/{id}/pause', 'DELETE /api/trainer/links/{id}/pause', 'POST /api/trainer/links/{id}/archive', 'POST /api/trainer/links/{id}/restore',
+  'GET /api/trainer/templates', 'POST /api/trainer/templates', 'POST /api/trainer/templates/from-client/{id}', 'GET /api/trainer/templates/{id}',
+  'PUT /api/trainer/templates/{id}', 'DELETE /api/trainer/templates/{id}', 'POST /api/trainer/templates/{id}/assign',
+  'GET /api/trainer/managed/{id}/routines', 'POST /api/trainer/managed/{id}/routines/copy', 'POST /api/trainer/offers/{id}/accept', 'POST /api/trainer/offers/{id}/decline']) {
   test(`trainer route ${route} exists and is documented`, () => {
     assert.ok(server.includes(`'${route}'`), `${route} missing from server.js`);
     const [method, path] = route.split(' ');
@@ -116,4 +119,35 @@ test('pause and archive routes change the link only: no state file, and only the
   const target = server.slice(server.indexOf('function telegramClientTarget'), server.indexOf('function commitState'));
   assert.match(target, /l\.status === 'active'/);
   assert.ok(!/archived/.test(target), 'an archived link must not open a client');
+});
+
+test('templates and offers (section 17): a client document is written only for a managed client, through commitState after managedClientOf; offers never write one', () => {
+  const at = server.indexOf('function deliverToLink(');
+  const fn = server.slice(at, server.indexOf('function linkIdsOf(', at));
+  assert.ok(at > 0 && fn.length > 100);
+  assert.match(fn, /managedClientOf\(user, linkId\)/);
+  const calls = [...fn.matchAll(/commitState\(([^,]+),/g)];
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].trim(), 't.client');
+  assert.ok(fn.indexOf('managedClientOf(') < fn.indexOf('commitState('), 'the managed client is resolved before the write');
+  // The write sits inside the managed branch; what follows it (a Telegram client) puts an offer on the link and touches no document.
+  const managedBranch = fn.indexOf('if (link.managed)');
+  const telegramPart = fn.slice(fn.indexOf('buildOffer('));
+  assert.ok(managedBranch > 0 && managedBranch < fn.indexOf('commitState('));
+  assert.ok(!/stateFile|atomicWrite|writeState|stateCache|commitState|readStateStrict/.test(telegramPart), 'a Telegram clients document is not touched');
+  assert.match(telegramPart, /link\.offers = /);
+  // The accept and decline routes only take an offer off the link.
+  const oStart = server.indexOf("'POST /api/trainer/offers/{id}/accept'");
+  const oEnd = server.indexOf("'GET /api/trainer/clients'");
+  assert.ok(oStart > 0 && oEnd > oStart);
+  assert.ok(!/stateFile|atomicWrite|writeState|stateCache|commitState|readStateStrict/.test(server.slice(oStart, oEnd)), 'an offer route touches a state file');
+  // The routes that read a client's routines resolve a managed client first (a Telegram client's routines are never read).
+  const rStart = server.indexOf("'POST /api/trainer/templates/from-client/{id}'");
+  assert.ok(/managedClientOf\(user, req\.trainerId\)/.test(server.slice(rStart, rStart + 400)), 'from-client does not resolve a managed client');
+  const lStart = server.indexOf("'GET /api/trainer/managed/{id}/routines'");
+  assert.ok(/managedTarget\(req, res, user\)/.test(server.slice(lStart, lStart + 500)), 'the routine list does not call managedTarget');
+  const cStart = server.indexOf("'POST /api/trainer/managed/{id}/routines/copy'");
+  assert.ok(/managedTarget\(req, res, user\)/.test(server.slice(cStart, cStart + 500)), 'copy does not call managedTarget');
+  // Nothing that is not a trainer's route writes a template file by hand.
+  assert.ok(!/atomicWrite\([^)]*trainer-templates/.test(server));
 });

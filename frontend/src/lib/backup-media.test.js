@@ -94,6 +94,15 @@ describe('import', () => {
     expect(read.state.customEx[1].media.mime).toBe('image/jpeg')
   })
 
+  it('keeps the mark «written by the trainer» on a workout, through the JSON and the zip (TG14, section 16)', async () => {
+    const S = { workouts: [{ id: 'w1', d: '2026-01-01', entries: [], via: 'coach' }, { id: 'w2', d: '2026-01-02', entries: [] }], routines: [] }
+    const json = await readBackupFile(new File([JSON.stringify(S)], 'b.json', { type: 'application/json' }))
+    expect(json.state.workouts.map(w => w.via)).toEqual(['coach', undefined])
+    const out = await exportBackupZip(S, { media: createMediaStore(memoryBackend()) })
+    const zip = await readBackupFile(new File([out.blob], 'b.zip'))
+    expect(zip.state.workouts.map(w => w.via)).toEqual(['coach', undefined])
+  })
+
   it('refuses what is not an openGym backup, zipped or not', async () => {
     await expect(readBackupFile(new File(['{"hello":1}'], 'x.json'))).rejects.toThrow()
     const zip = await zipStore([{ name: 'something.txt', blob: new Blob(['x']) }])

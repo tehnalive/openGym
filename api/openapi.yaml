@@ -3525,6 +3525,10 @@ paths:
                         description: 'Only while the trainer has the client on pause. The trainer''s reason is not shown to the client.'
                         properties:
                           until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
+                      offers:
+                        type: array
+                        description: 'Open offers from the trainer (TRAINER_MODE.md section 17), at most 5.'
+                        items: { $ref: '#/components/schemas/TrainerOffer' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: 'Not a Telegram profile (`code: telegram-required`).'
@@ -4154,6 +4158,385 @@ paths:
           description: 'Not the caller''s managed client (`client-gone`).'
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
+  /api/trainer/templates:
+    get:
+      tags: [data]
+      operationId: listTrainerTemplates
+      summary: My templates
+      description: |
+        Trainer templates (TG14, TRAINER_MODE.md section 17): a snapshot of the trainer's routines, kept in
+        `DATA_DIR/trainer-templates-<uid>.json` and removed with the account. Only the trainer's own; every route
+        here is `403 not-trainer` before the role is turned on.
+      responses:
+        '200':
+          description: One row per template.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limit: { type: integer, description: 'Templates a trainer may keep (50).' }
+                  templates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        note: { type: string }
+                        unit: { type: string, enum: [kg, lb] }
+                        routineCount: { type: integer }
+                        routineNames: { type: array, items: { type: string } }
+                        exerciseCount: { type: integer }
+                        updatedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 'Not a Telegram profile (`telegram-required`) or not a trainer (`not-trainer`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [data]
+      operationId: createTrainerTemplate
+      summary: Save routines as a template
+      description: |
+        The app sends the trainer's own routines (and the custom exercises they use). The server drops bookkeeping
+        (`_ts`, `_f`, `_u`, `by`, `via`) and media, keeps only the custom exercises a routine uses. At most 50
+        templates, 20 routines in one, 200 KB each.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, routines]
+              properties:
+                name: { type: string, maxLength: 60 }
+                note: { type: string, maxLength: 300 }
+                unit: { type: string, enum: [kg, lb] }
+                routines: { type: array, minItems: 1, maxItems: 20, items: { type: object } }
+                customEx: { type: array, items: { type: object } }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  template: { type: object }
+        '400':
+          description: '`name-required`, `routines-required`, `too-many-routines`, `routine-invalid`, `custom-invalid`, `bad-request`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`telegram-required` or `not-trainer`.'
+        '409':
+          description: '`templates-limit`.'
+        '413':
+          description: '`template-too-big`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/templates/from-client/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: createTrainerTemplateFromClient
+      summary: Save routines of a client without Telegram as a template
+      description: |
+        The server reads the routines named by `routineIds` from the managed client's diary. A client who signed in
+        with Telegram does not give routines to the trainer: `403 client-private`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, routineIds]
+              properties:
+                name: { type: string, maxLength: 60 }
+                note: { type: string, maxLength: 300 }
+                routineIds: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  template: { type: object }
+        '400':
+          description: 'As for `POST /api/trainer/templates`, and `routines-required`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`client-private` (a Telegram client), `not-trainer`.'
+        '404':
+          description: '`client-gone` or `routine-gone`.'
+        '409':
+          description: '`templates-limit`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/templates/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: getTrainerTemplate
+      summary: One template with its routines
+      responses:
+        '200':
+          description: The template.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s template (`template-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    put:
+      tags: [data]
+      operationId: changeTrainerTemplate
+      summary: Rename a template, change its note or its set of routines
+      description: |
+        `name`, `note`, and `routineIds`: the routines that stay, in the order wanted (a subset of what the template
+        holds; at least one). A template is not extended: make a new one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 60 }
+                note: { type: string, maxLength: 300 }
+                routineIds: { type: array, minItems: 1, items: { type: string } }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  template: { type: object }
+        '400':
+          description: '`name-required`, `routines-required`, `routine-gone`, `bad-request`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`template-gone`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [data]
+      operationId: deleteTrainerTemplate
+      summary: Delete a template
+      description: Copies already handed to clients stay where they are.
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`template-gone`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/templates/{id}/assign:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: assignTrainerTemplate
+      summary: Hand a template to clients
+      description: |
+        Per link, an independent copy (no link to the template afterwards):
+        - a client without Telegram: the routines are added to the diary through the same write as `PUT /api/data`
+          (new ids, `fromTemplate`, a free name: «Тяни (2)» when «Тяни» exists, missing custom exercises added under
+          new ids, weights converted to the diary's unit). Nothing of the diary is replaced; assigning again adds
+          another copy. Result `added`.
+        - a client who signed in with Telegram: nothing of their document is written. An offer (at most 5 open per
+          link, 60 KB each) is put on the link; the client's app adds it itself. Result `offered`.
+        A result `error` carries `code`: `client-gone`, `unreadable`, `doc-too-big`, `offer-too-big`, `write-failed`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkIds]
+              properties:
+                linkIds: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+      responses:
+        '200':
+          description: One result per link.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        linkId: { type: string }
+                        result: { type: string, enum: [added, offered, error] }
+                        code: { type: string }
+        '400':
+          description: '`links-required`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`template-gone`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/managed/{id}/routines:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of a managed client.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    get:
+      tags: [data]
+      operationId: listManagedClientRoutines
+      summary: The routines of a client without Telegram (names)
+      description: |
+        For choosing what to save as a template or copy to other clients. Ids, names and the number of exercises only.
+        A client who signed in with Telegram does not give routines to the trainer: this answers `404 client-gone` for such a link.
+      responses:
+        '200':
+          description: The routines.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  routines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        exerciseCount: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Not the caller''s managed client (`client-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/managed/{id}/routines/copy:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The link id of the managed client the routines are taken from.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: copyManagedClientRoutines
+      summary: Copy routines of a client without Telegram to other clients
+      description: |
+        The source is only a client without Telegram (a Telegram client's routines are never read). The recipients are
+        handled as in `POST /api/trainer/templates/{id}/assign`; the source itself answers `error: same-client`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [routineIds, toLinkIds]
+              properties:
+                routineIds: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+                toLinkIds: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+      responses:
+        '200':
+          description: One result per recipient, as for assigning a template.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  results: { type: array, items: { type: object } }
+        '400':
+          description: '`links-required`, `routines-required`.'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`client-gone` or `routine-gone`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/offers/{id}/accept:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: acceptTrainerOffer
+      summary: Take an offer off the list (the app adds the routines itself)
+      description: |
+        For the client of an active link. The server writes nothing to the client's document: it removes the offer,
+        writes an audit line and answers with the offer, so the app adds exactly that to its own diary. The app adds
+        the routines first (marked `fromOffer`) and calls this afterwards; calling it again answers `404 offer-gone`.
+      responses:
+        '200':
+          description: The offer.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  offer: { $ref: '#/components/schemas/TrainerOffer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`offer-gone`: not an offer on the caller''s link, or already taken.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/trainer/offers/{id}/decline:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{8,32}$' }
+    post:
+      tags: [data]
+      operationId: declineTrainerOffer
+      summary: Decline an offer
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`offer-gone`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   /api/trainer/links/{id}/schedule:
     parameters:
       - name: id
@@ -4595,6 +4978,19 @@ components:
         history: { type: boolean }
         measures: { type: boolean }
         stats: { type: boolean }
+
+    TrainerOffer:
+      type: object
+      description: A program the trainer handed to a client who signed in with Telegram; the app adds it to the client's own diary.
+      properties:
+        id: { type: string }
+        templateName: { type: string }
+        unit: { type: string, enum: [kg, lb] }
+        at: { type: string, format: date-time }
+        routineCount: { type: integer }
+        routineNames: { type: array, items: { type: string } }
+        routines: { type: array, items: { type: object } }
+        customEx: { type: array, items: { type: object } }
 
     PasskeyList:
       type: object

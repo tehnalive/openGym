@@ -48,6 +48,8 @@ const PRESENCE = [
   ['Trainer mode: API image ships trainer-managed.js', 'api/Dockerfile', 'has', 'trainer-managed.js'],
   ['Trainer mode: managed routes in openapi.yaml', 'api/openapi.yaml', 'has', '/api/trainer/managed/{id}/ops:'],
   ['Trainer mode: managed client screen route', 'frontend/src/App.jsx', 'has', '/trainer/m/:linkId'],
+  ['Coach mark: commitState settles the marks', 'api/server.js', 'has', 'applyCoachMarks(cur, body.state,'],
+  ['Coach mark: badge component', 'frontend/src/components/CoachMark.jsx', 'has', "w.via === 'coach'"],
   ['Managed diary: document routes', 'api/openapi.yaml', 'has', '/api/trainer/managed/{id}/data:'],
   ['Managed diary: guards load before any other module', 'frontend/src/main.jsx', 'has', "import { isManagedMode } from './lib/managed-mode.js'"],
   ['Managed diary: not a Telegram launch', 'frontend/src/lib/telegram.js', 'has', 'if (isManagedMode()) return false'],
@@ -67,6 +69,13 @@ const PRESENCE = [
   ['Plan compliance: only with the history grant', 'api/server.js', 'has', 'function trainerCompliance'],
   ['Plan compliance: in openapi.yaml', 'api/openapi.yaml', 'has', 'TrainerCompliance:'],
   ['Plan compliance: cabinet card', 'frontend/src/views/TrainerHome.jsx', 'has', '<AttentionCard'],
+  ['Trainer templates: assign route', 'api/server.js', 'has', "'POST /api/trainer/templates/{id}/assign'"],
+  ['Trainer templates: offer routes', 'api/server.js', 'has', "'POST /api/trainer/offers/{id}/accept'"],
+  ['Trainer templates: API image ships trainer-templates.js', 'api/Dockerfile', 'has', 'trainer-templates.js'],
+  ['Trainer templates: routes in openapi.yaml', 'api/openapi.yaml', 'has', '/api/trainer/templates/{id}/assign:'],
+  ['Trainer templates: audit labels', 'frontend/src/lib/audit.js', 'has', "'trainer.template.assign'"],
+  ['Trainer templates: offer gate in App', 'frontend/src/App.jsx', 'has', '<TrainerOfferGate'],
+  ['Trainer templates: screen route in App', 'frontend/src/App.jsx', 'has', '/trainer/templates'],
   ['Trainer mode: settings card', 'frontend/src/views/Settings.jsx', 'has', '<TrainerSettings />'],
   ['Removed: check-in screen', 'frontend/src/App.jsx', 'not', 'views/CheckIn.jsx'],
   ['Removed: progress photos screen', 'frontend/src/App.jsx', 'not', 'views/ProgressPhotos.jsx'],
@@ -78,12 +87,13 @@ const FRONTEND_TESTS = [
   'src/App.telegram.test.jsx', 'src/components/ProfileAvatar.test.jsx', 'src/views/FirstRunOnboarding.test.jsx',
   'src/store/useStore.telegram.test.jsx',
   'src/lib/trainer.test.js', 'src/components/TrainerConsent.test.jsx', 'src/views/Trainer.test.jsx', 'src/lib/plan-link.test.js',
-  'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx', 'src/lib/managed-mode.test.js', 'src/components/ManagedBar.test.jsx', 'src/views/ReadonlyDiary.test.jsx',
+  'src/lib/trainer-managed.test.js', 'src/views/TrainerManaged.test.jsx', 'src/lib/managed-mode.test.js', 'src/components/ManagedBar.test.jsx', 'src/views/ReadonlyDiary.test.jsx', 'src/components/CoachMark.test.jsx',
   'src/views/TrainerPauseArchive.test.jsx', 'src/components/TrainerSchedule.test.jsx',
+  'src/lib/trainer-templates.test.js', 'src/components/TrainerOffer.test.jsx', 'src/views/TrainerTemplates.test.jsx',
 ]
 const API_TESTS = [
   'test/fork-routes.test.js', 'test/server-telegram-only.test.js', 'test/telegram-login.test.js', 'test/openapi-routes.test.js',
-  'test/trainer.test.js', 'test/trainer-managed.test.js',
+  'test/trainer.test.js', 'test/trainer-managed.test.js', 'test/trainer-templates.test.js',
   'test/trainer-pause.test.js', 'test/trainer-compliance.test.js', 'test/trainer-compliance-routes.test.js',
 ]
 
