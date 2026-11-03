@@ -3771,7 +3771,7 @@ paths:
                         name: { type: string }
                         managed: { type: boolean }
                         archivedAt: { type: string, format: date-time, nullable: true }
-                        avatarUrl: { type: string }
+                        archivedOn: { type: string, nullable: true, description: 'The day of the archive in the trainer''s time zone, YYYY-MM-DD.' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: 'Not a trainer (`not-trainer`) or not a Telegram profile.'
@@ -3872,6 +3872,7 @@ paths:
                   since: { type: string, format: date-time }
                   grants: { $ref: '#/components/schemas/TrainerGrants' }
                   schedule: { type: object, nullable: true }
+                  pause: { $ref: '#/components/schemas/TrainerPause' }
                   compliance: { $ref: '#/components/schemas/TrainerCompliance' }
                   data: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -3951,6 +3952,7 @@ paths:
                   note: { type: string }
                   managed: { type: boolean }
                   schedule: { type: object, nullable: true }
+                  pause: { $ref: '#/components/schemas/TrainerPause' }
                   compliance: { $ref: '#/components/schemas/TrainerCompliance' }
                   rev: { type: integer }
                   data: { type: object }
@@ -4237,15 +4239,24 @@ paths:
                 properties:
                   pause: { $ref: '#/components/schemas/TrainerPause' }
         '400':
-          description: '`bad-request`, `until-invalid`, `until-past` or `until-far`.'
+          description: '`bad-request`, `until-invalid` (also for a date that is not on the calendar), `until-past` or `until-far`.'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: 'Not the caller''s active link (`link-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     delete:
       tags: [data]
       operationId: resumeTrainerClient
       summary: Take a client off pause
-      description: The client is expected again from today. Taking off a pause that is not there is not an error.
+      description: The client is expected again from today. Taking off a pause that is not there is not an error. The body may carry `tz`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tz: { type: string, description: 'The trainer''s time zone, so "today" is the trainer''s day.' }
       responses:
         '200':
           description: Off pause.
@@ -4258,6 +4269,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: 'Not the caller''s active link (`link-gone`).'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/trainer/links/{id}/archive:
     parameters:
@@ -4274,8 +4286,16 @@ paths:
         Frees the place (an archived client is not counted in the limit of five) and closes the trainer's access:
         every client route answers `404 client-gone` until the client is restored. The client's data is kept. A
         pause is lifted. A client with Telegram sees the link as archived and can end it; a client without Telegram
-        keeps only the export and the delete. At most 50 archived clients (`409 archive-limit`). The body may
-        carry `tz`, the trainer's time zone, so the day of the archive is the trainer's day.
+        keeps only the export and the delete, and is told by the bot. At most 50 archived clients (`409 archive-limit`).
+        The body may carry `tz`, the trainer's time zone, so the day of the archive is the trainer's day.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tz: { type: string, description: 'The trainer''s time zone, so the day of the archive is the trainer''s day.' }
       responses:
         '200':
           description: Archived.
@@ -4291,6 +4311,7 @@ paths:
           description: 'Not the caller''s active link (`link-gone`).'
         '409':
           description: '`archive-limit`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/trainer/links/{id}/restore:
     parameters:
@@ -4305,7 +4326,18 @@ paths:
       summary: Bring a client back from the archive
       description: |
         Takes a place again, so it needs a free one: with five active clients the answer is `409 client-limit`
-        with the same text as for a new client. The trainer's access is back at once. The body may carry `tz`.
+        with the same text as for a new client; the check is made at the moment of the change, so two restores at
+        once cannot both take the last place. A link whose consent is of an older text answers `409 consent-outdated`
+        ("the client has to accept the invitation again"; not for a client without Telegram). The trainer's access is
+        back at once and the client is told by the bot. The body may carry `tz`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tz: { type: string, description: 'The trainer''s time zone, so the day of the return is the trainer''s day.' }
       responses:
         '200':
           description: Active again.
@@ -4316,7 +4348,8 @@ paths:
         '404':
           description: 'Not the caller''s archived link (`link-gone`).'
         '409':
-          description: '`client-limit`.'
+          description: '`client-limit` or `consent-outdated`.'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/trainer/links/{id}:
     parameters:
@@ -4518,7 +4551,7 @@ components:
       properties:
         since: { type: string, format: date-time }
         until: { type: string, nullable: true, description: 'Last paused day, YYYY-MM-DD; null is no end.' }
-        reason: { type: string }
+        reason: { type: string, description: 'The trainer''s own note: only the trainer sees it. The client is told that there is a pause and until when, nothing else.' }
     TrainerCompliance:
       type: object
       nullable: true
